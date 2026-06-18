@@ -196,6 +196,19 @@ type StorageInfo struct {
 	IsFull     bool    `json:"is_full"`
 }
 
+type AIRequestLog struct {
+	ID         string    `json:"id"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model"`
+	URL        string    `json:"url"`
+	Request    string    `json:"request"`
+	Response   string    `json:"response"`
+	DurationMs int64     `json:"duration_ms"`
+	Success    bool      `json:"success"`
+	Error      string    `json:"error,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Store struct {
 	mu       sync.RWMutex
 	Agents   map[string]*Agent

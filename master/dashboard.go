@@ -88,6 +88,18 @@ var dashboardHTML = `<!DOCTYPE html>
   .flex { display: flex; gap: 12px; align-items: center; }
   .ml-auto { margin-left: auto; }
   .toast { position: fixed; bottom: 20px; right: 20px; background: #7c3aed; color: white; padding: 12px 20px; border-radius: 8px; display: none; z-index: 1000; font-size: 13px; }
+  .ai-log-card { background: #0f1117; border: 1px solid #2a2d3e; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+  .ai-log-card.success { border-left: 3px solid #34d399; }
+  .ai-log-card.error { border-left: 3px solid #f87171; }
+  .ai-log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px; }
+  .ai-log-meta { color: #8b8fa3; font-size: 12px; }
+  .ai-log-url { color: #60a5fa; font-size: 12px; font-family: monospace; word-break: break-all; }
+  .ai-log-body { margin-top: 8px; }
+  .ai-log-toggle { cursor: pointer; color: #a78bfa; font-size: 12px; font-weight: 600; user-select: none; }
+  .ai-log-toggle:hover { color: #c4b5fd; }
+  .ai-log-pre { background: #1a1c2e; border: 1px solid #2a2d3e; border-radius: 6px; padding: 10px; font-size: 11px; font-family: monospace; color: #e1e4e8; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; margin-top: 6px; display: none; }
+  .btn-delete { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
+  .btn-delete:hover { background: #7f1d1d; color: #fca5a5; }
 </style>
 </head>
 <body>
@@ -108,6 +120,7 @@ var dashboardHTML = `<!DOCTYPE html>
     <div class="tab active" onclick="showTab('agents')">Agents</div>
     <div class="tab" onclick="showTab('files')">Files</div>
     <div class="tab" onclick="showTab('reports')">Reports</div>
+    <div class="tab" onclick="showTab('ai-monitor')">🤖 AI Monitor</div>
     <div class="tab" onclick="showTab('settings')">Settings</div>
   </div>
 
@@ -118,7 +131,7 @@ var dashboardHTML = `<!DOCTYPE html>
       <button class="btn btn-primary btn-sm" onclick="refreshAll()">↻ Refresh</button>
     </div>
     <table>
-      <thead><tr><th style="width:15%">Name</th><th class="col-id">ID</th><th style="width:10%">IP</th><th class="col-status">Status</th><th style="width:18%">Last Heartbeat</th><th style="width:12%">Actions</th></tr></thead>
+      <thead><tr><th style="width:15%">Name</th><th class="col-id">ID</th><th style="width:10%">IP</th><th class="col-status">Status</th><th style="width:18%">Last Heartbeat</th><th style="width:18%">Actions</th></tr></thead>
       <tbody id="agents-table"><tr><td colspan="6" class="empty-state">Loading...</td></tr></tbody>
     </table>
   </div>
@@ -155,7 +168,7 @@ var dashboardHTML = `<!DOCTYPE html>
     <table>
       <thead><tr>
         <th class="col-checkbox"><input type="checkbox" id="select-all-cb" onchange="toggleAllCheckboxes(this)"></th>
-        <th class="col-path">Path</th><th class="col-agent">Agent</th><th class="col-size">Size</th><th class="col-progress">Progress</th><th class="col-status">Status</th>
+        <th class="col-path">Path</th><th class="col-agent">Agent</th><th class="col-size">Size</th><th class="col-progress">Progress</th><th class="col-status">Status</th><th style="width:50px"></th>
       </tr></thead>
       <tbody id="files-table"><tr><td colspan="6" class="empty-state">Click <b>🔍 Scan Files</b> to discover log files</td></tr></tbody>
     </table>
@@ -168,6 +181,16 @@ var dashboardHTML = `<!DOCTYPE html>
       <button class="btn btn-primary btn-sm" onclick="loadReports()">↻ Refresh</button>
     </div>
     <div id="reports-container"><div class="empty-state">No reports yet.</div></div>
+  </div>
+
+  <!-- AI Monitor Panel -->
+  <div class="panel" id="panel-ai-monitor">
+    <div class="flex" style="margin-bottom:16px">
+      <h3 style="flex:1">🤖 AI Request/Response Monitor</h3>
+      <button class="btn btn-sm" style="background:#374151;color:#e1e4e8" onclick="clearAILogs()">🗑 Clear Logs</button>
+      <button class="btn btn-primary btn-sm" onclick="loadAILogs()">↻ Refresh</button>
+    </div>
+    <div id="ai-logs-container"><div class="empty-state">No AI requests yet.</div></div>
   </div>
 
   <!-- Settings Panel -->
@@ -263,7 +286,7 @@ async function logout() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadAgents(), loadFiles(), loadReports(), loadStorage()]);
+  await Promise.all([loadAgents(), loadFiles(), loadReports(), loadStorage(), loadAILogs()]);
 }
 
 async function loadAgents() {
@@ -274,12 +297,16 @@ async function loadAgents() {
   const filter = document.getElementById('file-agent-filter');
   const prevVal = filter.value;
   filter.innerHTML = '<option value="">All Agents</option>';
-  if (!agents.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No agents registered yet</td></tr>'; return; }
+  if (!agents.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No agents registered yet</td></tr>'; return; }
   let html = '';
   agents.forEach(a => {
     const badge = a.status==='online' ? 'badge-online' : a.status==='scanning' ? 'badge-scanning' : 'badge-offline';
     const hb = new Date(a.last_heartbeat).toLocaleString();
-    html += '<tr><td>'+a.name+'</td><td style="font-family:monospace;font-size:11px">'+a.id.slice(0,8)+'...</td><td>'+a.ip+'</td><td><span class="badge '+badge+'">'+a.status+'</span></td><td>'+hb+'</td><td><button class="btn btn-primary btn-sm" onclick="sendScanToAgent(\''+a.id+'\')">🔍 Scan</button></td></tr>';
+    let actions = '<button class="btn btn-primary btn-sm" onclick="sendScanToAgent(\''+a.id+'\')">🔍 Scan</button>';
+    if (a.status === 'offline') {
+      actions += ' <button class="btn btn-delete btn-sm" onclick="deleteAgent(\''+a.id+'\',\''+a.name+'\')">🗑 Delete</button>';
+    }
+    html += '<tr><td>'+a.name+'</td><td style="font-family:monospace;font-size:11px" title="'+a.id+'">'+a.id.slice(0,8)+'...</td><td>'+a.ip+'</td><td><span class="badge '+badge+'">'+a.status+'</span></td><td>'+hb+'</td><td>'+actions+'</td></tr>';
     filter.innerHTML += '<option value="'+a.id+'">'+a.name+'</option>';
   });
   filter.value = prevVal;
@@ -317,7 +344,7 @@ function updateStepIndicator() {
 function renderFileTable() {
   const tbody = document.getElementById('files-table');
   if (!files.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Click <b>🔍 Scan Files</b> to discover log files</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Click <b>🔍 Scan Files</b> to discover log files</td></tr>';
     return;
   }
   let html = '';
@@ -348,12 +375,14 @@ function renderFileTable() {
     const cbHtml = isPending
       ? '<td><input type="checkbox" class="file-cb" value="'+f.id+'" data-agent="'+f.agent_id+'"></td>'
       : '<td><input type="checkbox" disabled checked></td>';
+    const deleteBtn = '<td><button class="btn btn-delete btn-sm" onclick="deleteFile(\''+f.id+'\')" title="Delete">🗑</button></td>';
     html += '<tr'+(isDone?' style="opacity:0.6"':'')+'>'+cbHtml
       +'<td class="col-path" style="font-family:monospace;font-size:12px" title="'+f.path+'">'+f.path+'</td>'
       +'<td>'+(agent?agent.name:'?')+'</td>'
       +'<td>'+sizeKB+' KB</td>'
       +'<td>'+progressHtml+'</td>'
-      +'<td>'+statusBadge+'</td></tr>';
+      +'<td>'+statusBadge+'</td>'
+      +deleteBtn+'</tr>';
   });
   tbody.innerHTML = html;
 }
@@ -394,6 +423,92 @@ function sendScanToAgent(agentID) {
     else toast('Error: '+res.error);
     setTimeout(loadFiles, 3000);
   });
+}
+
+async function deleteAgent(agentID, agentName) {
+  if (!confirm('Delete agent "'+agentName+'" and ALL its data (files, reports, commands)?')) return;
+  const res = await api('/agents/'+agentID, 'DELETE');
+  if (res.success) { toast('Agent deleted!'); loadAgents(); loadFiles(); }
+  else toast('Error: '+res.error);
+}
+
+async function deleteFile(fileID) {
+  if (!confirm('Delete this file from the list?')) return;
+  const res = await api('/files/'+fileID, 'DELETE');
+  if (res.success) { toast('File deleted!'); loadFiles(); }
+  else toast('Error: '+res.error);
+}
+
+async function loadAILogs() {
+  const res = await api('/ai-logs');
+  const logs = res.data || [];
+  const container = document.getElementById('ai-logs-container');
+  if (!logs.length) { container.innerHTML = '<div class="empty-state">No AI requests yet.</div>'; return; }
+  let html = '';
+  logs.forEach((l, i) => {
+    const cls = l.success ? 'success' : 'error';
+    const statusBadge = l.success
+      ? '<span class="badge badge-done">✓ OK</span>'
+      : '<span class="badge badge-critical">✗ Error</span>';
+    const ts = new Date(l.created_at).toLocaleString();
+    let reqPreview = '';
+    try {
+      const r = JSON.parse(l.request);
+      if (r.messages && r.messages.length) {
+        const userMsg = r.messages.find(m => m.role==='user');
+        reqPreview = userMsg ? userMsg.content.substring(0,150)+'...' : l.request.substring(0,150)+'...';
+      } else { reqPreview = l.request.substring(0,150)+'...'; }
+    } catch(e) { reqPreview = l.request.substring(0,150)+'...'; }
+
+    let respPreview = '';
+    try {
+      const r = JSON.parse(l.response);
+      if (r.message && r.message.content) respPreview = r.message.content.substring(0,150)+'...';
+      else if (r.choices && r.choices[0]) respPreview = r.choices[0].message.content.substring(0,150)+'...';
+      else respPreview = l.response.substring(0,150)+'...';
+    } catch(e) { respPreview = l.response.substring(0,150)+'...'; }
+
+    html += '<div class="ai-log-card '+cls+'">'
+      +'<div class="ai-log-header">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+          +statusBadge
+          +'<span class="badge badge-info">'+l.provider+'</span>'
+          +'<span style="color:#e1e4e8;font-size:13px;font-weight:600">'+l.model+'</span>'
+          +'<span class="ai-log-meta">'+l.duration_ms+'ms</span>'
+        +'</div>'
+        +'<span class="ai-log-meta">'+ts+'</span>'
+      +'</div>'
+      +'<div class="ai-log-url">'+l.url+'</div>'
+      +(l.error ? '<div style="color:#f87171;font-size:12px;margin-top:4px">Error: '+l.error+'</div>' : '')
+      +'<div class="ai-log-body">'
+        +'<div class="ai-log-toggle" onclick="toggleAILog('+i+')">▸ Request</div>'
+        +'<pre class="ai-log-pre" id="ai-req-'+i+'">'+formatJSON(l.request)+'</pre>'
+        +'<div class="ai-log-toggle" onclick="toggleAILogResp('+i+')">▸ Response</div>'
+        +'<pre class="ai-log-pre" id="ai-resp-'+i+'">'+formatJSON(l.response)+'</pre>'
+      +'</div>'
+    +'</div>';
+  });
+  container.innerHTML = html;
+}
+
+function toggleAILog(i) {
+  const el = document.getElementById('ai-req-'+i);
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function toggleAILogResp(i) {
+  const el = document.getElementById('ai-resp-'+i);
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function formatJSON(str) {
+  try { return JSON.stringify(JSON.parse(str), null, 2); } catch(e) { return str; }
+}
+
+async function clearAILogs() {
+  if (!confirm('Clear all AI request logs?')) return;
+  const res = await api('/ai-logs', 'DELETE');
+  if (res.success) { toast('AI logs cleared!'); loadAILogs(); }
+  else toast('Error: '+res.error);
 }
 
 function sendScanCommand() {

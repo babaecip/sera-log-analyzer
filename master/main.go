@@ -53,11 +53,13 @@ func main() {
 
 	// === Admin API (session-protected) ===
 	mux.HandleFunc("/api/agents", sessionMiddleware(handleGetAgents))
-	mux.HandleFunc("/api/agents/", sessionMiddleware(handleGetAgent))
+	mux.HandleFunc("/api/agents/", sessionMiddleware(handleAgentActions))
 	mux.HandleFunc("/api/command", sessionMiddleware(handleSendCommand))
 	mux.HandleFunc("/api/files", sessionMiddleware(handleGetFiles))
+	mux.HandleFunc("/api/files/", sessionMiddleware(handleFileActions))
 	mux.HandleFunc("/api/files/select", sessionMiddleware(handleSelectFiles))
 	mux.HandleFunc("/api/reports", sessionMiddleware(handleGetReports))
+	mux.HandleFunc("/api/ai-logs", sessionMiddleware(handleGetAILogs))
 	mux.HandleFunc("/api/storage", sessionMiddleware(handleGetStorage))
 	mux.HandleFunc("/api/config/ai", sessionMiddleware(handleAIConfig))
 	mux.HandleFunc("/api/config/telegram", sessionMiddleware(handleTelegramConfig))
@@ -160,6 +162,19 @@ func initDB() {
 		sent_to_tg INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS ai_request_logs (
+		id TEXT PRIMARY KEY,
+		provider TEXT DEFAULT '',
+		model TEXT DEFAULT '',
+		url TEXT DEFAULT '',
+		request TEXT DEFAULT '',
+		response TEXT DEFAULT '',
+		duration_ms INTEGER DEFAULT 0,
+		success INTEGER DEFAULT 1,
+		error TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 
 	_, err = db.Exec(schema)
@@ -172,6 +187,8 @@ func initDB() {
 		ticker := time.NewTicker(5 * time.Minute)
 		for range ticker.C {
 			cleanupOldChunks()
+			// Also cleanup old AI logs (keep last 500)
+			db.Exec("DELETE FROM ai_request_logs WHERE id NOT IN (SELECT id FROM ai_request_logs ORDER BY created_at DESC LIMIT 500)")
 		}
 	}()
 
@@ -420,6 +437,23 @@ func handleAgentScanResult(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, APIResponse{Success: true})
 }
 
+func handleFileActions(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Path[len("/api/files/"):]
+	if id == "" {
+		jsonError(w, "file id required", http.StatusBadRequest)
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		db.Exec("DELETE FROM files WHERE id = ?", id)
+		log.Printf("[MASTER] File deleted: %s", id)
+		jsonResponse(w, APIResponse{Success: true})
+		return
+	}
+
+	jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
 func handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -482,22 +516,38 @@ func handleGetAgents(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, APIResponse{Success: true, Data: agents})
 }
 
-func handleGetAgent(w http.ResponseWriter, r *http.Request) {
+func handleAgentActions(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/api/agents/"):]
 	if id == "" {
 		jsonError(w, "agent id required", http.StatusBadRequest)
 		return
 	}
 
-	var a Agent
-	err := db.QueryRow("SELECT id, name, ip, status, last_heartbeat, registered_at FROM agents WHERE id = ?", id).
-		Scan(&a.ID, &a.Name, &a.IP, &a.Status, &a.LastHeartbeat, &a.RegisteredAt)
-	if err != nil {
-		jsonError(w, "agent not found", http.StatusNotFound)
+	if r.Method == http.MethodGet {
+		var a Agent
+		err := db.QueryRow("SELECT id, name, ip, status, last_heartbeat, registered_at FROM agents WHERE id = ?", id).
+			Scan(&a.ID, &a.Name, &a.IP, &a.Status, &a.LastHeartbeat, &a.RegisteredAt)
+		if err != nil {
+			jsonError(w, "agent not found", http.StatusNotFound)
+			return
+		}
+		jsonResponse(w, APIResponse{Success: true, Data: a})
 		return
 	}
 
-	jsonResponse(w, APIResponse{Success: true, Data: a})
+	if r.Method == http.MethodDelete {
+		// Delete agent and its related data
+		db.Exec("DELETE FROM agents WHERE id = ?", id)
+		db.Exec("DELETE FROM files WHERE agent_id = ?", id)
+		db.Exec("DELETE FROM commands WHERE agent_id = ?", id)
+		db.Exec("DELETE FROM log_chunks WHERE agent_id = ?", id)
+		db.Exec("DELETE FROM ai_reports WHERE agent_id = ?", id)
+		log.Printf("[MASTER] Agent deleted: %s", id)
+		jsonResponse(w, APIResponse{Success: true})
+		return
+	}
+
+	jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
 func handleSendCommand(w http.ResponseWriter, r *http.Request) {
@@ -528,6 +578,44 @@ func handleSendCommand(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[MASTER] Command %s sent to agent %s: %s", cmdID, req.AgentID, req.Type)
 	jsonResponse(w, APIResponse{Success: true, Data: map[string]string{"command_id": cmdID}})
+}
+
+func handleGetAILogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		db.Exec("DELETE FROM ai_request_logs")
+		log.Println("[MASTER] AI request logs cleared")
+		jsonResponse(w, APIResponse{Success: true})
+		return
+	}
+
+	limit := r.URL.Query().Get("limit")
+	if limit == "" {
+		limit = "50"
+	}
+
+	rows, err := db.Query(
+		"SELECT id, provider, model, url, request, response, duration_ms, success, error, created_at FROM ai_request_logs ORDER BY created_at DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		jsonError(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var logs []AIRequestLog
+	for rows.Next() {
+		var l AIRequestLog
+		var successInt int
+		rows.Scan(&l.ID, &l.Provider, &l.Model, &l.URL, &l.Request, &l.Response, &l.DurationMs, &successInt, &l.Error, &l.CreatedAt)
+		l.Success = successInt == 1
+		logs = append(logs, l)
+	}
+	if logs == nil {
+		logs = []AIRequestLog{}
+	}
+
+	jsonResponse(w, APIResponse{Success: true, Data: logs})
 }
 
 func handleGetFiles(w http.ResponseWriter, r *http.Request) {

@@ -193,8 +193,12 @@ func callOllama(userMsg string) (string, error) {
 	body, _ := json.Marshal(reqBody)
 	url := config.AI.BaseURL + "/api/chat"
 
+	start := time.Now()
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	duration := time.Since(start).Milliseconds()
+
 	if err != nil {
+		logAILog("ollama", config.AI.Model, url, string(body), "", duration, false, err.Error())
 		return "", fmt.Errorf("ollama request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -203,13 +207,16 @@ func callOllama(userMsg string) (string, error) {
 
 	var chatResp ChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		logAILog("ollama", config.AI.Model, url, string(body), string(respBody), duration, false, err.Error())
 		return "", fmt.Errorf("ollama response parse failed: %w", err)
 	}
 
 	if chatResp.Error != "" {
+		logAILog("ollama", config.AI.Model, url, string(body), string(respBody), duration, false, chatResp.Error)
 		return "", fmt.Errorf("ollama error: %s", chatResp.Error)
 	}
 
+	logAILog("ollama", config.AI.Model, url, string(body), string(respBody), duration, true, "")
 	return chatResp.Message.Content, nil
 }
 
@@ -234,8 +241,12 @@ func callOpenAI(userMsg string) (string, error) {
 		req.Header.Set("Authorization", "Bearer "+config.AI.APIKey)
 	}
 
+	start := time.Now()
 	resp, err := http.DefaultClient.Do(req)
+	duration := time.Since(start).Milliseconds()
+
 	if err != nil {
+		logAILog("openai", config.AI.Model, url, string(body), "", duration, false, err.Error())
 		return "", fmt.Errorf("openai request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -244,17 +255,21 @@ func callOpenAI(userMsg string) (string, error) {
 
 	var chatResp OpenAIResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		logAILog("openai", config.AI.Model, url, string(body), string(respBody), duration, false, err.Error())
 		return "", fmt.Errorf("openai response parse failed: %w", err)
 	}
 
 	if chatResp.Error != nil {
+		logAILog("openai", config.AI.Model, url, string(body), string(respBody), duration, false, chatResp.Error.Message)
 		return "", fmt.Errorf("openai error: %s", chatResp.Error.Message)
 	}
 
 	if len(chatResp.Choices) == 0 {
+		logAILog("openai", config.AI.Model, url, string(body), string(respBody), duration, false, "no choices returned")
 		return "", fmt.Errorf("openai returned no choices")
 	}
 
+	logAILog("openai", config.AI.Model, url, string(body), string(respBody), duration, true, "")
 	return chatResp.Choices[0].Message.Content, nil
 }
 
@@ -316,4 +331,26 @@ func updateFileOffset(agentID, filePath string, chunkNum int) {
 	)
 
 	db.Exec("UPDATE files SET offset = ?, status = 'processing' WHERE agent_id = ? AND path = ?", newOffset, agentID, filePath)
+}
+
+func logAILog(provider, model, url, request, response string, durationMs int64, success bool, errMsg string) {
+	id := uuid.New().String()
+	successInt := 0
+	if success {
+		successInt = 1
+	}
+	// Truncate very long request/response to avoid bloating DB (keep first 2000 chars each)
+	if len(request) > 2000 {
+		request = request[:2000] + "...[truncated]"
+	}
+	if len(response) > 2000 {
+		response = response[:2000] + "...[truncated]"
+	}
+	_, err := db.Exec(
+		"INSERT INTO ai_request_logs (id, provider, model, url, request, response, duration_ms, success, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		id, provider, model, url, request, response, durationMs, successInt, errMsg, time.Now(),
+	)
+	if err != nil {
+		log.Printf("[AI] Failed to log AI request: %v", err)
+	}
 }
