@@ -34,52 +34,57 @@ Sistem analisis log terdistribusi dengan AI-powered analysis, dibangun menggunak
 
 ## ⚡ Quick Start — Full Stack (Master + Agent + Ollama)
 
-```
-docker-compose up -d
+```bash
+docker compose up -d
 ```
 
 Lalu pull model AI:
-```
+```bash
 docker exec sera-ollama ollama pull qwen2.5:0.5b
 ```
 
-Dashboard: **http://localhost:8080/?key=sera-change-this-key**
+Buka dashboard: **http://localhost:8080** → Login dengan credentials default:
+- Username: `admin`
+- Password: `sera-admin-2024`
+
+> ⚠️ **Ganti password di `.env`** (`ADMIN_PASS`) sebelum production!
 
 ---
 
 ## 🖥️ Jalankan Master Saja
 
-Kalau kamu mau host master di satu mesin (misalnya VPS/PC sendiri), dan agent akan dijalankan di mesin lain via Docker.
+### Cara A — Docker CLI (Recommended, langsung pull dari Docker Hub)
 
-### 1. Edit `.env`
+```bash
+# Pull image
+docker pull mrseptian/sera-log-analyzer:master
 
-```env
-# Master config
-MASTER_API_KEY=rahasia-kamu-disini
-MAX_STORAGE_MB=500
-
-# AI config (bisa pakai remote Ollama / OpenAI)
-AI_PROVIDER=openai-compatible
-AI_BASE_URL=https://your-ai-server.com
-AI_MODEL=qwen2.5:0.5b
-AI_API_KEY=sk-xxx
-
-# Telegram (opsional)
-TG_ENABLED=false
-TG_BOT_TOKEN=
-TG_CHAT_ID=
+# Jalankan master
+docker run -d \
+  --name sera-master \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e API_KEY=rahasia-kamu-disini \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASS=ganti-password-ini \
+  -e MAX_STORAGE_MB=500 \
+  -e AI_PROVIDER=ollama \
+  -e AI_BASE_URL=http://host.docker.internal:11434 \
+  -e AI_MODEL=qwen2.5:0.5b \
+  -e TG_ENABLED=false \
+  -v sera-data:/app/data \
+  mrseptian/sera-log-analyzer:master
 ```
 
-### 2. Build & Jalankan Master
+Buka: **http://localhost:8080**
+
+### Cara B — Docker Compose
+
+Kalau pakai docker-compose (full project), edit `.env` lalu:
 
 ```bash
 cd sera-log-analyzer
-
-# Build image master
-docker-compose build master
-
-# Jalankan master saja (tidak ada agent)
-docker-compose up -d master
+docker compose up -d master
 ```
 
 ### 3. Cek Status
@@ -88,11 +93,11 @@ docker-compose up -d master
 # Cek container
 docker ps --filter "name=sera-master"
 
+# Cek log
+docker logs sera-master
+
 # Cek health
 curl http://localhost:8080/health
-
-# Buka dashboard
-# http://localhost:8080/?key=rahasia-kamu-disini
 ```
 
 ### 4. (Opsional) Jalankan Ollama di Mesin yang Sama
@@ -101,7 +106,7 @@ Kalau mau pakai AI local:
 
 ```bash
 # Jalankan ollama
-docker-compose --profile ai up -d ollama
+docker compose --profile ai up -d ollama
 
 # Pull model
 docker exec sera-ollama ollama pull qwen2.5:0.5b
@@ -115,13 +120,11 @@ docker exec sera-ollama ollama pull qwen2.5:0.5b
 
 Agent bisa dijalankan di **mesin mana saja** yang bisa akses master. Ada 3 cara:
 
-### Cara A — Agent via Docker (Recommended)
+### Cara A — Agent via Docker CLI (Recommended, langsung pull dari Docker Hub)
 
 ```bash
-cd sera-log-analyzer
-
-# Build image agent
-docker-compose build agent-1
+# Pull image
+docker pull mrseptian/sera-log-analyzer:agent
 
 # Jalankan agent, hubungkan ke master di IP lain
 docker run -d \
@@ -135,7 +138,7 @@ docker run -d \
   -e EXTENSIONS=.log,.log.2,.err \
   -v /var/log:/var/log:ro \
   -v /tmp:/tmp:ro \
-  sera-log-analyzer-agent-1
+  mrseptian/sera-log-analyzer:agent
 ```
 
 > Ganti `IP_MASTER` dengan IP publik/privat mesin yang menjalankan master.
@@ -205,7 +208,9 @@ sera-log-analyzer/
 | Variable | Default | Deskripsi |
 |----------|---------|-----------|
 | `PORT` | `8080` | Port HTTP master |
-| `API_KEY` | `sera-default-key` | **Wajib diganti!** Kunci autentikasi |
+| `API_KEY` | `sera-default-key` | **Wajib diganti!** Kunci autentikasi agent |
+| `ADMIN_USER` | `admin` | Username login dashboard |
+| `ADMIN_PASS` | `sera-admin-2024` | **Wajib diganti!** Password login dashboard (bcrypt hashed) |
 | `MAX_STORAGE_MB` | `500` | Maks ukuran SQLite (tolak data kalau penuh) |
 | `AI_PROVIDER` | `ollama` | `ollama`, `openai`, atau `openai-compatible` |
 | `AI_BASE_URL` | `http://ollama:11434` | URL endpoint AI |
@@ -232,9 +237,17 @@ sera-log-analyzer/
 
 ## 🌐 API Endpoints
 
-Semua endpoint butuh header `X-API-Key` atau query `?key=xxx`.
+### Login / Auth
 
-### Agent API
+| Method | Path | Deskripsi |
+|--------|------|-----------|
+| GET | `/login` | Halaman login (browser) |
+| POST | `/api/login` | Login (username + password + captcha) |
+| POST | `/api/logout` | Logout (hapus session) |
+| GET | `/api/captcha` | Ambil CAPTCHA baru |
+| GET | `/api/session` | Cek status session (authenticated?) |
+
+### Agent API (butuh header `X-API-Key`)
 
 | Method | Path | Deskripsi |
 |--------|------|-----------|
