@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # MASTER - Admin dashboard, AI processing, Telegram notifications
+  # ============================================================
+  master:
+    build:
+      context: .
+      dockerfile: master/Dockerfile
+    container_name: sera-master
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - API_KEY=${MASTER_API_KEY:-sera-default-key}
+      - MAX_STORAGE_MB=${MAX_STORAGE_MB:-500}
+      # AI Configuration
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - AI_BASE_URL=${AI_BASE_URL:-http://ollama:11434}
+      - AI_MODEL=${AI_MODEL:-qwen2.5:0.5b}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-512}
+      - AI_CHUNK_SIZE=${AI_CHUNK_SIZE:-3}
+      # Telegram Configuration
+      - TG_ENABLED=${TG_ENABLED:-false}
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN:-}
+      - TG_CHAT_ID=${TG_CHAT_ID:-}
+    volumes:
+      - master-data:/app/data
+    networks:
+      - sera-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================
+  # OLLAMA - Local AI model server (optional, if using Ollama)
+  # Start separately: docker-compose up -d ollama
+  # ============================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sera-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - sera-net
+    profiles:
+      - ai
+
+  # ============================================================
+  # AGENT 1 - Log scanner (connects to master)
+  # ============================================================
+  agent-1:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: sera-agent-1
+    restart: unless-stopped
+    depends_on:
+      master:
+        condition: service_healthy
+    environment:
+      - MASTER_URL=http://master:8080
+      - MASTER_KEY=${MASTER_API_KEY:-sera-default-key}
+      - AGENT_NAME=${AGENT_1_NAME:-agent-server-1}
+      - AGENT_ID=${AGENT_1_ID:-}
+      - POLL_INTERVAL=3
+      - SCAN_ROOTS=${AGENT_1_SCAN_ROOTS:-/var/log,/tmp}
+      - EXTENSIONS=${AGENT_1_EXTENSIONS:-.log}
+    volumes:
+      # Mount host log directories for scanning
+      - /var/log:/var/log:ro
+      - /tmp:/tmp:ro
+      # Optional: mount additional log paths
+      # - /path/to/your/logs:/logs:ro
+    networks:
+      - sera-net
+
+  # ============================================================
+  # AGENT 2 - Additional agent (optional, for remote machines)
+  # To run agent on remote machine, use the agent binary directly:
+  #   MASTER_URL=http://YOUR_MASTER_IP:8080
+  #   MASTER_KEY=your-key
+  #   AGENT_NAME=agent-remote-1
+  # ============================================================
+  # agent-2:
+  #   build:
+  #     context: .
+  #     dockerfile: agent/Dockerfile
+  #   container_name: sera-agent-2
+  #   restart: unless-stopped
+  #   depends_on:
+  #     master:
+  #       condition: service_healthy
+  #   environment:
+  #     - MASTER_URL=http://master:8080
+  #     - MASTER_KEY=${MASTER_API_KEY:-sera-default-key}
+  #     - AGENT_NAME=${AGENT_2_NAME:-agent-remote-1}
+  #     - AGENT_ID=${AGENT_2_ID:-}
+  #     - POLL_INTERVAL=3
+  #     - SCAN_ROOTS=${AGENT_2_SCAN_ROOTS:-/var/log}
+  #     - EXTENSIONS=${AGENT_2_EXTENSIONS:-.log}
+  #   volumes:
+  #     - /var/log:/var/log:ro
+  #   networks:
+  #     - sera-net
+
+volumes:
+  master-data:
+  ollama-data:
+
+networks:
+  sera-net:
+    driver: bridge

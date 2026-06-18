@@ -1,0 +1,22 @@
+# Binaries
+master/master
+agent/agent
+*.exe
+
+# Data
+master/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
