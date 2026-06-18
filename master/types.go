@@ -210,6 +210,28 @@ type AIRequestLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type AIQueueStatus string
+
+const (
+	AIQueuePending    AIQueueStatus = "pending"
+	AIQueueProcessing AIQueueStatus = "processing"
+	AIQueueDone       AIQueueStatus = "done"
+	AIQueueFailed     AIQueueStatus = "failed"
+)
+
+type AIQueueItem struct {
+	ID        string        `json:"id"`
+	AgentID   string        `json:"agent_id"`
+	FilePath  string        `json:"file_path"`
+	ChunkNum  int           `json:"chunk_num"`
+	Lines     string        `json:"lines"`
+	Status    AIQueueStatus `json:"status"`
+	Position  int           `json:"position"`
+	Result    string        `json:"result,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
 type Store struct {
 	mu       sync.RWMutex
 	Agents   map[string]*Agent

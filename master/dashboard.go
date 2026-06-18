@@ -201,10 +201,30 @@ var dashboardHTML = `<!DOCTYPE html>
   <!-- AI Monitor Panel -->
   <div class="panel" id="panel-ai-monitor">
     <div class="flex" style="margin-bottom:16px">
-      <h3 style="flex:1">🤖 AI Request/Response Monitor</h3>
+      <h3 style="flex:1">🤖 AI Processing Queue</h3>
       <button class="btn btn-sm" style="background:#374151;color:#e1e4e8" onclick="clearAILogs()">🗑 Clear Logs</button>
-      <button class="btn btn-primary btn-sm" onclick="loadAILogs()">↻ Refresh</button>
+      <button class="btn btn-primary btn-sm" onclick="loadAIQueue();loadAILogs()">↻ Refresh</button>
     </div>
+
+    <!-- Queue Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px" id="queue-stats">
+      <div class="stat-card" style="padding:14px"><div class="label">Waiting</div><div class="value yellow" id="q-pending" style="font-size:22px">0</div></div>
+      <div class="stat-card" style="padding:14px"><div class="label">Processing</div><div class="value blue" id="q-processing" style="font-size:22px">0</div></div>
+      <div class="stat-card" style="padding:14px"><div class="label">Done</div><div class="value green" id="q-done" style="font-size:22px">0</div></div>
+      <div class="stat-card" style="padding:14px"><div class="label">Failed</div><div class="value red" id="q-failed" style="font-size:22px">0</div></div>
+    </div>
+
+    <!-- Queue Table -->
+    <h4 style="color:#a78bfa;margin-bottom:10px">📋 Queue (oldest → newest)</h4>
+    <table style="table-layout:auto">
+      <thead><tr><th style="width:60px">#</th><th>File</th><th style="width:80px">Chunk</th><th style="width:100px">Agent</th><th style="width:100px">Status</th><th style="width:160px">Time</th></tr></thead>
+      <tbody id="queue-table"><tr><td colspan="6" class="empty-state">No items in queue</td></tr></tbody>
+    </table>
+
+    <hr style="border-color:#2a2d3e;margin:24px 0">
+
+    <!-- AI Request Logs -->
+    <h4 style="color:#a78bfa;margin-bottom:10px">📡 AI Request/Response Logs</h4>
     <div id="ai-logs-container"><div class="empty-state">No AI requests yet.</div></div>
   </div>
 
@@ -305,7 +325,7 @@ async function logout() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadAgents(), loadFiles(), loadReports(), loadStorage(), loadAILogs()]);
+  await Promise.all([loadAgents(), loadFiles(), loadReports(), loadStorage(), loadAIQueue(), loadAILogs()]);
 }
 
 function formatFileSize(bytes) {
@@ -464,6 +484,46 @@ async function deleteFile(fileID) {
   const res = await api('/files/'+fileID, 'DELETE');
   if (res.success) { toast('File deleted!'); loadFiles(); }
   else toast('Error: '+res.error);
+}
+
+async function loadAIQueue() {
+  const res = await api('/ai-queue');
+  const data = res.data || {};
+  const items = data.items || [];
+
+  document.getElementById('q-pending').textContent = data.pending || 0;
+  document.getElementById('q-processing').textContent = data.processing || 0;
+  document.getElementById('q-done').textContent = data.done || 0;
+  document.getElementById('q-failed').textContent = data.failed || 0;
+
+  const tbody = document.getElementById('queue-table');
+  if (!items.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No items in queue — start monitoring files to begin</td></tr>';
+    return;
+  }
+  let html = '';
+  items.forEach(item => {
+    const agent = agents.find(a => a.id === item.agent_id);
+    let statusBadge = '';
+    switch(item.status) {
+      case 'pending': statusBadge = '<span class="badge badge-pending">⏳ Waiting</span>'; break;
+      case 'processing': statusBadge = '<span class="badge badge-monitoring">⚙ Processing</span>'; break;
+      case 'done': statusBadge = '<span class="badge badge-done">✅ Done</span>'; break;
+      case 'failed': statusBadge = '<span class="badge badge-critical">✗ Failed</span>'; break;
+      default: statusBadge = '<span class="badge badge-pending">'+item.status+'</span>';
+    }
+    const ts = new Date(item.updated_at).toLocaleString();
+    const shortPath = item.file_path.length > 40 ? '...' + item.file_path.slice(-37) : item.file_path;
+    html += '<tr'+(item.status==='processing'?' style="background:#22243a"':'')+(item.status==='done'?' style="opacity:0.5"':'')+'>'
+      +'<td style="font-weight:600;color:#a78bfa">'+item.position+'</td>'
+      +'<td style="font-family:monospace;font-size:12px" title="'+item.file_path+'">'+shortPath+'</td>'
+      +'<td>#'+item.chunk_num+'</td>'
+      +'<td>'+(agent?agent.name:'?')+'</td>'
+      +'<td>'+statusBadge+'</td>'
+      +'<td style="font-size:12px;color:#8b8fa3">'+ts+'</td>'
+      +'</tr>';
+  });
+  tbody.innerHTML = html;
 }
 
 async function loadAILogs() {

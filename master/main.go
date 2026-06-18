@@ -63,6 +63,7 @@ func main() {
 	mux.HandleFunc("/api/files/bulk-delete", sessionMiddleware(handleBulkDeleteFiles))
 	mux.HandleFunc("/api/reports", sessionMiddleware(handleGetReports))
 	mux.HandleFunc("/api/ai-logs", sessionMiddleware(handleGetAILogs))
+	mux.HandleFunc("/api/ai-queue", sessionMiddleware(handleGetAIQueue))
 	mux.HandleFunc("/api/storage", sessionMiddleware(handleGetStorage))
 	mux.HandleFunc("/api/config/ai", sessionMiddleware(handleAIConfig))
 	mux.HandleFunc("/api/config/telegram", sessionMiddleware(handleTelegramConfig))
@@ -179,12 +180,28 @@ func initDB() {
 		error TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS ai_queue (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL,
+		file_path TEXT NOT NULL,
+		chunk_num INTEGER DEFAULT 0,
+		lines TEXT DEFAULT '',
+		status TEXT DEFAULT 'pending',
+		position INTEGER DEFAULT 0,
+		result TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 
 	_, err = db.Exec(schema)
 	if err != nil {
 		log.Fatalf("[MASTER] Failed to create tables: %v", err)
 	}
+
+	// Start the AI queue worker (single goroutine, sequential processing)
+	go aiQueueWorker()
 
 	// Periodic cleanup of old chunks (keep for max 1 hour)
 	go func() {
@@ -193,6 +210,8 @@ func initDB() {
 			cleanupOldChunks()
 			// Also cleanup old AI logs (keep last 500)
 			db.Exec("DELETE FROM ai_request_logs WHERE id NOT IN (SELECT id FROM ai_request_logs ORDER BY created_at DESC LIMIT 500)")
+			// Cleanup old completed queue items (keep last 100)
+			db.Exec("DELETE FROM ai_queue WHERE status IN ('done','failed') AND id NOT IN (SELECT id FROM ai_queue WHERE status IN ('done','failed') ORDER BY updated_at DESC LIMIT 100)")
 		}
 	}()
 
@@ -380,23 +399,13 @@ func handleAgentChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chunkID := uuid.New().String()
-	_, err := db.Exec(
-		"INSERT INTO log_chunks (id, agent_id, file_path, chunk_num, lines, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-		chunkID, req.AgentID, req.FilePath, req.ChunkNum, req.Lines, time.Now(),
-	)
-	if err != nil {
-		jsonError(w, "database error", http.StatusInternalServerError)
-		return
-	}
-
 	log.Printf("[MASTER] Received chunk %d for %s from agent %s (%d bytes)",
 		req.ChunkNum, req.FilePath, req.AgentID, len(req.Lines))
 
-	// Process the chunk with AI asynchronously
-	go processChunkWithAI(chunkID, req)
+	// Enqueue to AI processing queue (sequential, one at a time)
+	enqueueAIChunk(req.AgentID, req.FilePath, req.ChunkNum, req.Lines)
 
-	jsonResponse(w, APIResponse{Success: true, Data: map[string]string{"chunk_id": chunkID}})
+	jsonResponse(w, APIResponse{Success: true, Data: map[string]string{"status": "queued"}})
 }
 
 func handleAgentScanResult(w http.ResponseWriter, r *http.Request) {
@@ -663,6 +672,48 @@ func handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[MASTER] Bulk deleted %d files", len(req.IDs))
 	jsonResponse(w, APIResponse{Success: true})
+}
+
+func handleGetAIQueue(w http.ResponseWriter, r *http.Request) {
+	limit := r.URL.Query().Get("limit")
+	if limit == "" {
+		limit = "50"
+	}
+
+	rows, err := db.Query(
+		"SELECT id, agent_id, file_path, chunk_num, status, position, result, created_at, updated_at FROM ai_queue ORDER BY position ASC, created_at ASC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		jsonError(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var items []AIQueueItem
+	for rows.Next() {
+		var item AIQueueItem
+		rows.Scan(&item.ID, &item.AgentID, &item.FilePath, &item.ChunkNum, &item.Status, &item.Position, &item.Result, &item.CreatedAt, &item.UpdatedAt)
+		items = append(items, item)
+	}
+	if items == nil {
+		items = []AIQueueItem{}
+	}
+
+	// Get counts
+	var pendingCount, processingCount, doneCount, failedCount int
+	db.QueryRow("SELECT COUNT(*) FROM ai_queue WHERE status = 'pending'").Scan(&pendingCount)
+	db.QueryRow("SELECT COUNT(*) FROM ai_queue WHERE status = 'processing'").Scan(&processingCount)
+	db.QueryRow("SELECT COUNT(*) FROM ai_queue WHERE status = 'done'").Scan(&doneCount)
+	db.QueryRow("SELECT COUNT(*) FROM ai_queue WHERE status = 'failed'").Scan(&failedCount)
+
+	jsonResponse(w, APIResponse{Success: true, Data: map[string]interface{}{
+		"items":     items,
+		"pending":   pendingCount,
+		"processing": processingCount,
+		"done":      doneCount,
+		"failed":    failedCount,
+	}})
 }
 
 func handleGetAILogs(w http.ResponseWriter, r *http.Request) {
