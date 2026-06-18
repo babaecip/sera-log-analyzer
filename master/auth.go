@@ -78,10 +78,10 @@ func (s *SessionStore) Delete(token string) {
 // ============================================================
 
 type LoginAttempt struct {
-	Count     int
-	FirstAt   time.Time
-	LockedAt  time.Time
-	Locked    bool
+	Count    int
+	FirstAt  time.Time
+	LockedAt time.Time
+	Locked   bool
 }
 
 type RateLimiter struct {
@@ -153,7 +153,7 @@ type CaptchaQuestion struct {
 }
 
 type CaptchaStore struct {
-	mu       sync.RWMutex
+	mu        sync.RWMutex
 	questions map[string]*CaptchaQuestion
 }
 
@@ -220,9 +220,9 @@ func (cs *CaptchaStore) Verify(id string, answer int) bool {
 // ============================================================
 
 type AdminUser struct {
-	Username       string
-	PasswordHash   string
-	CreatedAt      time.Time
+	Username     string
+	PasswordHash string
+	CreatedAt    time.Time
 }
 
 var adminUser *AdminUser

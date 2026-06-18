@@ -18,9 +18,9 @@ var loginPageHTML = `<!DOCTYPE html>
   .form-group label { display: block; margin-bottom: 6px; color: #8b8fa3; font-size: 13px; font-weight: 500; }
   .form-group input { width: 100%; padding: 12px 14px; background: #0f1117; border: 1px solid #2a2d3e; border-radius: 8px; color: #e1e4e8; font-size: 14px; outline: none; transition: border-color 0.2s; }
   .form-group input:focus { border-color: #7c3aed; }
-  .captcha-box { background: #0f1117; border: 1px solid #2a2d3e; border-radius: 8px; padding: 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
-  .captcha-question { font-size: 20px; font-weight: 700; color: #a78bfa; font-family: monospace; white-space: nowrap; min-width: 130px; text-align: center; background: #1a1c2e; padding: 8px 16px; border-radius: 8px; }
-  .captcha-input { flex: 1; padding: 10px 14px; background: #1a1c2e; border: 1px solid #2a2d3e; border-radius: 8px; color: #e1e4e8; font-size: 18px; text-align: center; outline: none; }
+  .captcha-box { background: #0f1117; border: 1px solid #2a2d3e; border-radius: 8px; padding: 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; overflow: hidden; }
+  .captcha-question { font-size: 18px; font-weight: 700; color: #a78bfa; font-family: monospace; white-space: nowrap; flex-shrink: 0; text-align: center; background: #1a1c2e; padding: 8px 14px; border-radius: 8px; }
+  .captcha-input { flex: 1 1 0; min-width: 0; padding: 10px 10px; background: #1a1c2e; border: 1px solid #2a2d3e; border-radius: 8px; color: #e1e4e8; font-size: 18px; text-align: center; outline: none; }
   .captcha-input:focus { border-color: #7c3aed; }
   .btn-login { width: 100%; padding: 14px; background: #7c3aed; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-top: 8px; }
   .btn-login:hover { background: #6d28d9; }
