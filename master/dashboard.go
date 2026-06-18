@@ -202,6 +202,8 @@ var dashboardHTML = `<!DOCTYPE html>
   <div class="panel" id="panel-ai-monitor">
     <div class="flex" style="margin-bottom:16px">
       <h3 style="flex:1">🤖 AI Processing Queue</h3>
+      <button class="btn btn-stop btn-sm" onclick="stopQueue()">⏹ Stop Queue</button>
+      <button class="btn btn-delete btn-sm" onclick="clearQueue()">🗑 Clear Queue</button>
       <button class="btn btn-sm" style="background:#374151;color:#e1e4e8" onclick="clearAILogs()">🗑 Clear Logs</button>
       <button class="btn btn-primary btn-sm" onclick="loadAIQueue();loadAILogs()">↻ Refresh</button>
     </div>
@@ -669,6 +671,20 @@ async function stopAllMonitoring() {
   if (!confirm('Stop ALL monitoring? This will reset all monitoring files to pending.')) return;
   const res = await api('/files/stop-monitoring', 'POST');
   if (res.success) { toast('Monitoring stopped!'); loadFiles(); }
+  else toast('Error: '+res.error);
+}
+
+async function clearQueue() {
+  if (!confirm('Clear all pending/failed items from queue? Currently processing item will finish.')) return;
+  const res = await api('/ai-queue', 'DELETE');
+  if (res.success) { toast('Queue cleared!'); loadAIQueue(); }
+  else toast('Error: '+res.error);
+}
+
+async function stopQueue() {
+  if (!confirm('Stop queue? This will clear all pending items.')) return;
+  const res = await api('/ai-queue', 'DELETE');
+  if (res.success) { toast('Queue stopped!'); loadAIQueue(); }
   else toast('Error: '+res.error);
 }
 

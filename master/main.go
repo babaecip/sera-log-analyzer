@@ -675,6 +675,13 @@ func handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetAIQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		// Clear all pending items from queue
+		db.Exec("DELETE FROM ai_queue WHERE status IN ('pending','failed')")
+		log.Println("[MASTER] AI queue cleared")
+		jsonResponse(w, APIResponse{Success: true})
+		return
+	}
 	limit := r.URL.Query().Get("limit")
 	if limit == "" {
 		limit = "50"
