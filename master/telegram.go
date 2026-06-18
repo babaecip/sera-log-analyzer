@@ -33,17 +33,34 @@ func sendTelegramReport(report AIReport) {
 		severity = "🔴 CRITICAL"
 	}
 
+	// Lookup agent name
+	var agentName string
+	err := db.QueryRow("SELECT name FROM agents WHERE id = ?", report.AgentID).Scan(&agentName)
+	if err != nil || agentName == "" {
+		agentName = report.AgentID[:8] + "..."
+	}
+
+	// Calculate line range from chunk_num
+	var chunkSize int
+	db.QueryRow("SELECT chunk_size FROM files WHERE agent_id = ? AND path = ? LIMIT 1", report.AgentID, report.FilePath).Scan(&chunkSize)
+	if chunkSize <= 0 {
+		chunkSize = config.AI.ChunkSize
+	}
+	lineStart := report.ChunkNum * chunkSize
+	lineEnd := lineStart + chunkSize
+
 	text := fmt.Sprintf(
 		"*%s*\n\n"+
 			"*File:* `%s`\n"+
-			"*Chunk:* #%d\n"+
+			"*Lines:* #%d–%d\n"+
 			"*Agent:* %s\n\n"+
 			"*Summary:* %s\n\n"+
 			"*Details:*\n%s",
 		severity,
 		report.FilePath,
-		report.ChunkNum,
-		report.AgentID,
+		lineStart,
+		lineEnd,
+		agentName,
 		report.Summary,
 		report.Details,
 	)

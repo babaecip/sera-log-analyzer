@@ -165,7 +165,7 @@ var dashboardHTML = `<!DOCTYPE html>
       </select>
       <button class="btn btn-primary btn-sm" onclick="sendScanCommand()">🔍 1. Scan Files</button>
       <div id="select-controls" style="display:none;align-items:center;gap:8px">
-        <label style="font-size:13px;color:#8b8fa3">Chunk:</label>
+        <label style="font-size:13px;color:#8b8fa3">Lines:</label>
         <input type="number" id="chunk-size" value="3" min="1" max="50" style="width:60px;padding:4px 8px;background:#0f1117;border:1px solid #2a2d3e;color:#e1e4e8;border-radius:6px;font-size:13px">
         <button class="btn btn-success btn-sm" onclick="selectAllFiles()">✅ 2. Select All</button>
         <button class="btn btn-primary btn-sm" onclick="startMonitoring()">▶ 3. Start Monitoring</button>
@@ -217,7 +217,7 @@ var dashboardHTML = `<!DOCTYPE html>
     <!-- Queue Table -->
     <h4 style="color:#a78bfa;margin-bottom:10px">📋 Queue (oldest → newest)</h4>
     <table style="table-layout:auto">
-      <thead><tr><th style="width:60px">#</th><th>File</th><th style="width:80px">Chunk</th><th style="width:100px">Agent</th><th style="width:100px">Status</th><th style="width:160px">Time</th></tr></thead>
+      <thead><tr><th style="width:60px">#</th><th>File</th><th style="width:80px">Lines</th><th style="width:100px">Agent</th><th style="width:100px">Status</th><th style="width:160px">Time</th></tr></thead>
       <tbody id="queue-table"><tr><td colspan="6" class="empty-state">No items in queue</td></tr></tbody>
     </table>
 
@@ -252,7 +252,7 @@ var dashboardHTML = `<!DOCTYPE html>
           <input type="password" id="cfg-ai-key" placeholder="sk-...">
         </div>
         <div class="form-group">
-          <label>Chunk Size (lines per request)</label>
+          <label>Lines per Request</label>
           <input type="number" id="cfg-chunk" value="3" min="1" max="50">
         </div>
         <div class="form-group">
@@ -414,7 +414,7 @@ function renderFileTable() {
       const actions = f.action_reports || 0;
       const pct = isDone ? 100 : Math.min(90, reports * 5);
       progressHtml = '<div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%"></div></div>'
-        + '<div style="font-size:11px;color:#8b8fa3;margin-top:2px">'+reports+' chunks analyzed'
+        + '<div style="font-size:11px;color:#8b8fa3;margin-top:2px">'+reports+' lines analyzed'
         + (actions > 0 ? ' · <span style="color:#fbbf24">'+actions+' action needed</span>' : '')
         + '</div>';
     }
@@ -445,7 +445,7 @@ async function loadReports() {
     const badge = 'badge-'+r.severity;
     const sentBadge = r.sent_to_tg ? 'badge-sent' : 'badge-notsent';
     const ts = new Date(r.created_at).toLocaleString();
-    html += '<div class="report-card"><div class="report-header"><span class="badge '+badge+'">'+r.severity.toUpperCase()+'</span><span style="font-size:12px;color:#8b8fa3">'+ts+'</span></div><div class="report-path" title="'+r.file_path+'">'+r.file_path+' (chunk #'+r.chunk_num+')</div><div class="report-summary">'+r.summary+'</div>'+(r.details?'<div class="report-details">'+r.details+'</div>':'')+'<div style="margin-top:8px"><span class="badge '+sentBadge+'" style="font-size:10px">'+(r.sent_to_tg?'TG Sent':'No TG')+'</span></div></div>';
+    html += '<div class="report-card"><div class="report-header"><span class="badge '+badge+'">'+r.severity.toUpperCase()+'</span><span style="font-size:12px;color:#8b8fa3">'+ts+'</span></div><div class="report-path" title="'+r.file_path+'">'+r.file_path+' (line #'+r.chunk_num+')</div><div class="report-summary">'+r.summary+'</div>'+(r.details?'<div class="report-details">'+r.details+'</div>':'')+'<div style="margin-top:8px"><span class="badge '+sentBadge+'" style="font-size:10px">'+(r.sent_to_tg?'TG Sent':'No TG')+'</span></div></div>';
   });
   container.innerHTML = html;
 }

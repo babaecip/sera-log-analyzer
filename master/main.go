@@ -708,11 +708,11 @@ func handleGetAIQueue(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT COUNT(*) FROM ai_queue WHERE status = 'failed'").Scan(&failedCount)
 
 	jsonResponse(w, APIResponse{Success: true, Data: map[string]interface{}{
-		"items":     items,
-		"pending":   pendingCount,
+		"items":      items,
+		"pending":    pendingCount,
 		"processing": processingCount,
-		"done":      doneCount,
-		"failed":    failedCount,
+		"done":       doneCount,
+		"failed":     failedCount,
 	}})
 }
 
