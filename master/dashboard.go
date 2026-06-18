@@ -25,9 +25,17 @@ var dashboardHTML = `<!DOCTYPE html>
   .tab { padding: 10px 20px; cursor: pointer; border-radius: 8px 8px 0 0; color: #8b8fa3; font-size: 14px; transition: all 0.2s; border: 1px solid transparent; border-bottom: none; }
   .tab.active { background: #1a1c2e; color: #a78bfa; border-color: #2a2d3e; }
   .tab:hover { color: #a78bfa; }
-  .panel { display: none; background: #1a1c2e; border: 1px solid #2a2d3e; border-radius: 12px; padding: 20px; }
+  .panel { display: none; background: #1a1c2e; border: 1px solid #2a2d3e; border-radius: 12px; padding: 20px; overflow-x: auto; }
   .panel.active { display: block; }
-  table { width: 100%; border-collapse: collapse; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table th, table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-path { width: 35%; max-width: 400px; }
+  .col-id { width: 12%; }
+  .col-agent { width: 12%; }
+  .col-size { width: 8%; }
+  .col-progress { width: 18%; }
+  .col-status { width: 15%; }
+  .col-checkbox { width: 40px; }
   th { text-align: left; padding: 12px; color: #8b8fa3; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #2a2d3e; }
   td { padding: 12px; border-bottom: 1px solid #1e2030; font-size: 13px; }
   tr:hover { background: #22243a; }
@@ -71,9 +79,9 @@ var dashboardHTML = `<!DOCTYPE html>
   .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: #7c3aed; }
   .storage-bar { height: 20px; background: #0f1117; border-radius: 10px; overflow: hidden; margin-top: 8px; }
   .storage-fill { height: 100%; background: linear-gradient(90deg, #34d399, #fbbf24, #f87171); transition: width 0.3s; border-radius: 10px; }
-  .report-card { background: #0f1117; border: 1px solid #2a2d3e; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .report-card { background: #0f1117; border: 1px solid #2a2d3e; border-radius: 8px; padding: 16px; margin-bottom: 12px; overflow: hidden; }
   .report-card .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .report-card .report-path { color: #60a5fa; font-size: 13px; font-family: monospace; }
+  .report-card .report-path { color: #60a5fa; font-size: 13px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: block; }
   .report-card .report-summary { color: #e1e4e8; font-size: 14px; margin-bottom: 8px; }
   .report-card .report-details { color: #8b8fa3; font-size: 12px; }
   .empty-state { text-align: center; padding: 40px; color: #8b8fa3; }
@@ -110,7 +118,7 @@ var dashboardHTML = `<!DOCTYPE html>
       <button class="btn btn-primary btn-sm" onclick="refreshAll()">↻ Refresh</button>
     </div>
     <table>
-      <thead><tr><th>Name</th><th>ID</th><th>IP</th><th>Status</th><th>Last Heartbeat</th><th>Actions</th></tr></thead>
+      <thead><tr><th style="width:15%">Name</th><th class="col-id">ID</th><th style="width:10%">IP</th><th class="col-status">Status</th><th style="width:18%">Last Heartbeat</th><th style="width:12%">Actions</th></tr></thead>
       <tbody id="agents-table"><tr><td colspan="6" class="empty-state">Loading...</td></tr></tbody>
     </table>
   </div>
@@ -146,8 +154,8 @@ var dashboardHTML = `<!DOCTYPE html>
     <!-- File Table -->
     <table>
       <thead><tr>
-        <th style="width:40px"><input type="checkbox" id="select-all-cb" onchange="toggleAllCheckboxes(this)"></th>
-        <th>Path</th><th>Agent</th><th>Size</th><th>Progress</th><th>Status</th>
+        <th class="col-checkbox"><input type="checkbox" id="select-all-cb" onchange="toggleAllCheckboxes(this)"></th>
+        <th class="col-path">Path</th><th class="col-agent">Agent</th><th class="col-size">Size</th><th class="col-progress">Progress</th><th class="col-status">Status</th>
       </tr></thead>
       <tbody id="files-table"><tr><td colspan="6" class="empty-state">Click <b>🔍 Scan Files</b> to discover log files</td></tr></tbody>
     </table>
@@ -341,7 +349,7 @@ function renderFileTable() {
       ? '<td><input type="checkbox" class="file-cb" value="'+f.id+'" data-agent="'+f.agent_id+'"></td>'
       : '<td><input type="checkbox" disabled checked></td>';
     html += '<tr'+(isDone?' style="opacity:0.6"':'')+'>'+cbHtml
-      +'<td style="font-family:monospace;font-size:12px">'+f.path+'</td>'
+      +'<td class="col-path" style="font-family:monospace;font-size:12px" title="'+f.path+'">'+f.path+'</td>'
       +'<td>'+(agent?agent.name:'?')+'</td>'
       +'<td>'+sizeKB+' KB</td>'
       +'<td>'+progressHtml+'</td>'
@@ -361,7 +369,7 @@ async function loadReports() {
     const badge = 'badge-'+r.severity;
     const sentBadge = r.sent_to_tg ? 'badge-sent' : 'badge-notsent';
     const ts = new Date(r.created_at).toLocaleString();
-    html += '<div class="report-card"><div class="report-header"><span class="badge '+badge+'">'+r.severity.toUpperCase()+'</span><span style="font-size:12px;color:#8b8fa3">'+ts+'</span></div><div class="report-path">'+r.file_path+' (chunk #'+r.chunk_num+')</div><div class="report-summary">'+r.summary+'</div>'+(r.details?'<div class="report-details">'+r.details+'</div>':'')+'<div style="margin-top:8px"><span class="badge '+sentBadge+'" style="font-size:10px">'+(r.sent_to_tg?'TG Sent':'No TG')+'</span></div></div>';
+    html += '<div class="report-card"><div class="report-header"><span class="badge '+badge+'">'+r.severity.toUpperCase()+'</span><span style="font-size:12px;color:#8b8fa3">'+ts+'</span></div><div class="report-path" title="'+r.file_path+'">'+r.file_path+' (chunk #'+r.chunk_num+')</div><div class="report-summary">'+r.summary+'</div>'+(r.details?'<div class="report-details">'+r.details+'</div>':'')+'<div style="margin-top:8px"><span class="badge '+sentBadge+'" style="font-size:10px">'+(r.sent_to_tg?'TG Sent':'No TG')+'</span></div></div>';
   });
   container.innerHTML = html;
 }
