@@ -613,21 +613,23 @@ async function stopAllMonitoring() {
 }
 
 async function selectAllFiles() {
-  const agentFilter = document.getElementById('file-agent-filter').value;
-  if (!agentFilter) { toast('Select an agent first'); return; }
-  const chunkSize = parseInt(document.getElementById('chunk-size').value) || 3;
-  const res = await api('/files/select','POST',{select_all:true, agent_id:agentFilter, chunk_size:chunkSize});
-  if (res.success) { toast('Files selected! Click ▶ Start Monitoring'); loadFiles(); }
-  else toast('Error: '+res.error);
+  // Check all pending (unchecked) file checkboxes
+  document.querySelectorAll('.file-cb:not(:checked):not([disabled])').forEach(c => c.checked = true);
+  updateFileBulkBar();
+  const count = document.querySelectorAll('.file-cb:checked').length;
+  toast(count + ' file(s) selected');
 }
 
 async function startMonitoring() {
   const agentFilter = document.getElementById('file-agent-filter').value;
   if (!agentFilter) { toast('Select an agent first'); return; }
   const chunkSize = parseInt(document.getElementById('chunk-size').value) || 3;
-  await api('/files/select','POST',{select_all:true, agent_id:agentFilter, chunk_size:chunkSize});
-  toast('Monitoring started!');
-  loadFiles();
+  // Collect only checked file IDs
+  const fileIds = Array.from(document.querySelectorAll('.file-cb:checked')).map(c => c.value);
+  if (!fileIds.length) { toast('No files selected! Check files first.'); return; }
+  const res = await api('/files/select','POST',{select_all:false, file_ids:fileIds, agent_id:agentFilter, chunk_size:chunkSize});
+  if (res.success) { toast('Monitoring ' + fileIds.length + ' file(s) started!'); loadFiles(); }
+  else toast('Error: '+res.error);
 }
 
 async function saveAIConfig() {
