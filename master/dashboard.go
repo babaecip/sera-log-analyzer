@@ -44,6 +44,13 @@ var dashboardHTML = `<!DOCTYPE html>
   .badge-done { background: #064e3b; color: #34d399; }
   .badge-sent { background: #064e3b; color: #34d399; }
   .badge-notsent { background: #1e2030; color: #8b8fa3; }
+  .step-indicator { display:flex;align-items:center;gap:6px;padding:8px 16px;border-radius:20px;font-size:12px;font-weight:600;color:#8b8fa3;background:#1e2030;cursor:default;white-space:nowrap; }
+  .step-indicator.active { background:#7c3aed;color:white; }
+  .step-indicator.done { background:#064e3b;color:#34d399; }
+  .step-num { display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,0.15);font-size:11px; }
+  .step-line { flex:1;min-width:20px;height:2px;background:#2a2d3e; }
+  .progress-bar { width:100%;height:6px;background:#1e2030;border-radius:3px;overflow:hidden;min-width:80px; }
+  .progress-fill { height:100%;background:linear-gradient(90deg,#7c3aed,#a78bfa);border-radius:3px;transition:width 0.3s; }
   .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
   .btn-primary { background: #7c3aed; color: white; }
   .btn-primary:hover { background: #6d28d9; }
@@ -76,9 +83,9 @@ var dashboardHTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="header">
-  <h1>🔍 Sera Log Analyzer</h1>
-  <p>Master Dashboard — Manage agents, scan files, monitor AI analysis results</p>
+<div class="header" style="display:flex;align-items:center;justify-content:space-between">
+  <div><h1>🔍 Sera Log Analyzer</h1><p>Master Dashboard — Manage agents, scan files, monitor AI analysis results</p></div>
+  <div style="display:flex;align-items:center;gap:12px"><span id="user-info" style="color:#8b8fa3;font-size:13px"></span><button class="btn btn-sm" style="background:#dc2626;color:white" onclick="logout()">Logout</button></div>
 </div>
 
 <div class="container">
@@ -110,24 +117,39 @@ var dashboardHTML = `<!DOCTYPE html>
 
   <!-- Files Panel -->
   <div class="panel" id="panel-files">
-    <div class="flex" style="margin-bottom:16px">
-      <h3 style="flex:1">Discovered Files</h3>
+    <!-- Step Progress -->
+    <div style="display:flex;align-items:center;margin-bottom:24px;gap:0">
+      <div class="step-indicator active" id="step-1"><span class="step-num">1</span> Scan</div>
+      <div class="step-line"></div>
+      <div class="step-indicator" id="step-2"><span class="step-num">2</span> Select</div>
+      <div class="step-line"></div>
+      <div class="step-indicator" id="step-3"><span class="step-num">3</span> Monitor</div>
+      <div class="step-line"></div>
+      <div class="step-indicator" id="step-4"><span class="step-num">4</span> Done</div>
+    </div>
+
+    <!-- Actions Bar -->
+    <div class="flex" style="margin-bottom:16px;flex-wrap:wrap">
       <select id="file-agent-filter" style="padding:6px 12px;background:#0f1117;border:1px solid #2a2d3e;color:#e1e4e8;border-radius:6px;font-size:13px" onchange="loadFiles()">
         <option value="">All Agents</option>
       </select>
-      <button class="btn btn-primary btn-sm" onclick="loadFiles()">↻ Refresh</button>
-    </div>
-    <div style="margin-bottom:16px" id="file-actions">
-      <div class="flex">
-        <label style="font-size:13px;color:#8b8fa3">Chunk Size (lines):</label>
-        <input type="number" id="chunk-size" value="3" min="1" max="50" style="width:80px;padding:6px;background:#0f1117;border:1px solid #2a2d3e;color:#e1e4e8;border-radius:6px;font-size:13px">
-        <button class="btn btn-success btn-sm" onclick="selectAllFiles()">Select All</button>
-        <button class="btn btn-primary btn-sm" onclick="sendScanCommand()">🔍 Scan Files</button>
+      <button class="btn btn-primary btn-sm" onclick="sendScanCommand()">🔍 1. Scan Files</button>
+      <div id="select-controls" style="display:none;align-items:center;gap:8px">
+        <label style="font-size:13px;color:#8b8fa3">Chunk:</label>
+        <input type="number" id="chunk-size" value="3" min="1" max="50" style="width:60px;padding:4px 8px;background:#0f1117;border:1px solid #2a2d3e;color:#e1e4e8;border-radius:6px;font-size:13px">
+        <button class="btn btn-success btn-sm" onclick="selectAllFiles()">✅ 2. Select All</button>
+        <button class="btn btn-primary btn-sm" onclick="startMonitoring()">▶ 3. Start Monitoring</button>
       </div>
+      <button class="btn btn-sm" style="background:#374151;color:#e1e4e8;margin-left:auto" onclick="loadFiles()">↻ Refresh</button>
     </div>
+
+    <!-- File Table -->
     <table>
-      <thead><tr><th><input type="checkbox" id="select-all-cb" onchange="toggleAllCheckboxes(this)"></th><th>Path</th><th>Agent</th><th>Size</th><th>Status</th></tr></thead>
-      <tbody id="files-table"><tr><td colspan="5" class="empty-state">No files found. Click "Scan Files" to start.</td></tr></tbody>
+      <thead><tr>
+        <th style="width:40px"><input type="checkbox" id="select-all-cb" onchange="toggleAllCheckboxes(this)"></th>
+        <th>Path</th><th>Agent</th><th>Size</th><th>Progress</th><th>Status</th>
+      </tr></thead>
+      <tbody id="files-table"><tr><td colspan="6" class="empty-state">Click <b>🔍 Scan Files</b> to discover log files</td></tr></tbody>
     </table>
   </div>
 
@@ -201,8 +223,7 @@ var dashboardHTML = `<!DOCTYPE html>
 
 <script>
 const API = '/api';
-const KEY = new URLSearchParams(window.location.search).get('key') || 'sera-default-key';
-const headers = {'Content-Type':'application/json','X-API-Key':KEY};
+const headers = {'Content-Type':'application/json'};
 let agents = [];
 let files = [];
 
@@ -221,10 +242,16 @@ function showTab(name) {
 }
 
 async function api(path, method='GET', body=null) {
-  const opts = {method, headers};
+  const opts = {method, headers, credentials:'same-origin'};
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(API+path, opts);
+  if (resp.status === 401 || resp.redirected) { window.location.href = '/login'; return {}; }
   return resp.json();
+}
+
+async function logout() {
+  await fetch('/api/logout', {method:'POST', credentials:'same-origin'});
+  window.location.href = '/login';
 }
 
 async function refreshAll() {
@@ -237,15 +264,17 @@ async function loadAgents() {
   document.getElementById('stat-agents').textContent = agents.filter(a => a.status==='online').length;
   const tbody = document.getElementById('agents-table');
   const filter = document.getElementById('file-agent-filter');
+  const prevVal = filter.value;
   filter.innerHTML = '<option value="">All Agents</option>';
   if (!agents.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No agents registered yet</td></tr>'; return; }
   let html = '';
   agents.forEach(a => {
     const badge = a.status==='online' ? 'badge-online' : a.status==='scanning' ? 'badge-scanning' : 'badge-offline';
     const hb = new Date(a.last_heartbeat).toLocaleString();
-    html += '<tr><td>'+a.name+'</td><td style="font-family:monospace;font-size:11px">'+a.id.slice(0,8)+'...</td><td>'+a.ip+'</td><td><span class="badge '+badge+'">'+a.status+'</span></td><td>'+hb+'</td><td><button class="btn btn-primary btn-sm" onclick="sendScanToAgent(\''+a.id+'\')">Scan</button></td></tr>';
+    html += '<tr><td>'+a.name+'</td><td style="font-family:monospace;font-size:11px">'+a.id.slice(0,8)+'...</td><td>'+a.ip+'</td><td><span class="badge '+badge+'">'+a.status+'</span></td><td>'+hb+'</td><td><button class="btn btn-primary btn-sm" onclick="sendScanToAgent(\''+a.id+'\')">🔍 Scan</button></td></tr>';
     filter.innerHTML += '<option value="'+a.id+'">'+a.name+'</option>';
   });
+  filter.value = prevVal;
   tbody.innerHTML = html;
 }
 
@@ -255,14 +284,68 @@ async function loadFiles() {
   const res = await api('/files'+q);
   files = res.data || [];
   document.getElementById('stat-files').textContent = files.filter(f => f.status==='monitoring'||f.status==='processing').length;
+  updateStepIndicator();
+  renderFileTable();
+}
+
+function updateStepIndicator() {
+  const pending = files.filter(f => f.status==='pending').length;
+  const monitoring = files.filter(f => f.status==='monitoring'||f.status==='processing').length;
+  const done = files.filter(f => f.status==='done').length;
+  const hasAny = pending > 0 || monitoring > 0 || done > 0;
+  const s1 = document.getElementById('step-1');
+  const s2 = document.getElementById('step-2');
+  const s3 = document.getElementById('step-3');
+  const s4 = document.getElementById('step-4');
+  const selectCtrl = document.getElementById('select-controls');
+
+  s1.className = 'step-indicator' + (hasAny ? ' done' : ' active');
+  s2.className = 'step-indicator' + (pending > 0 && monitoring === 0 ? ' active' : (pending === 0 && (monitoring > 0 || done > 0) ? ' done' : ''));
+  s3.className = 'step-indicator' + (monitoring > 0 ? ' active' : (monitoring === 0 && done > 0 ? ' done' : ''));
+  s4.className = 'step-indicator' + (done > 0 && monitoring === 0 ? ' done' : (done > 0 ? ' active' : ''));
+  selectCtrl.style.display = (pending > 0 || files.length > 0) ? 'flex' : 'none';
+}
+
+function renderFileTable() {
   const tbody = document.getElementById('files-table');
-  if (!files.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No files found. Click "Scan Files" to start.</td></tr>'; return; }
+  if (!files.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Click <b>🔍 Scan Files</b> to discover log files</td></tr>';
+    return;
+  }
   let html = '';
   files.forEach(f => {
-    const badge = 'badge-'+f.status;
     const sizeKB = (f.size/1024).toFixed(1);
     const agent = agents.find(a => a.id===f.agent_id);
-    html += '<tr><td><input type="checkbox" class="file-cb" value="'+f.id+'" data-agent="'+f.agent_id+'"></td><td style="font-family:monospace;font-size:12px">'+f.path+'</td><td>'+(agent?agent.name:'?')+'</td><td>'+sizeKB+' KB</td><td><span class="badge '+badge+'">'+f.status+'</span></td></tr>';
+    const isPending = f.status === 'pending';
+    const isMonitoring = f.status === 'monitoring' || f.status === 'processing';
+    const isDone = f.status === 'done';
+    let statusBadge = '';
+    switch(f.status) {
+      case 'pending': statusBadge = '<span class="badge badge-pending">⏳ Pending</span>'; break;
+      case 'monitoring': statusBadge = '<span class="badge badge-monitoring">👁 Monitoring</span>'; break;
+      case 'processing': statusBadge = '<span class="badge badge-processing">⚙ Processing</span>'; break;
+      case 'done': statusBadge = '<span class="badge badge-done">✅ Done</span>'; break;
+      default: statusBadge = '<span class="badge badge-pending">'+f.status+'</span>';
+    }
+    let progressHtml = '<div style="color:#8b8fa3;font-size:12px">—</div>';
+    if (isMonitoring || isDone) {
+      const reports = f.total_reports || 0;
+      const actions = f.action_reports || 0;
+      const pct = isDone ? 100 : Math.min(90, reports * 5);
+      progressHtml = '<div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%"></div></div>'
+        + '<div style="font-size:11px;color:#8b8fa3;margin-top:2px">'+reports+' chunks analyzed'
+        + (actions > 0 ? ' · <span style="color:#fbbf24">'+actions+' action needed</span>' : '')
+        + '</div>';
+    }
+    const cbHtml = isPending
+      ? '<td><input type="checkbox" class="file-cb" value="'+f.id+'" data-agent="'+f.agent_id+'"></td>'
+      : '<td><input type="checkbox" disabled checked></td>';
+    html += '<tr'+(isDone?' style="opacity:0.6"':'')+'>'+cbHtml
+      +'<td style="font-family:monospace;font-size:12px">'+f.path+'</td>'
+      +'<td>'+(agent?agent.name:'?')+'</td>'
+      +'<td>'+sizeKB+' KB</td>'
+      +'<td>'+progressHtml+'</td>'
+      +'<td>'+statusBadge+'</td></tr>';
   });
   tbody.innerHTML = html;
 }
@@ -292,16 +375,17 @@ async function loadStorage() {
   document.getElementById('cfg-max-storage').value = s.max_mb || 500;
 }
 
-async function sendScanToAgent(agentID) {
-  const ext = prompt('Enter file extensions (comma-separated, e.g. .log,.log.2,.err):', '.log');
+function sendScanToAgent(agentID) {
+  const ext = prompt('File extensions (comma-separated):', '.log');
   if (!ext) return;
-  const roots = prompt('Enter root paths (comma-separated, e.g. /var/log,/tmp):', '/var/log');
+  const roots = prompt('Root paths (comma-separated):', '/var/log');
   if (!roots) return;
   const payload = JSON.stringify({extensions:ext.split(',').map(s=>s.trim()), root_paths:roots.split(',').map(s=>s.trim()), max_depth:5});
-  const res = await api('/command','POST',{agent_id:agentID,type:'scan_files',payload});
-  if (res.success) toast('Scan command sent!');
-  else toast('Error: '+res.error);
-  setTimeout(loadFiles, 2000);
+  api('/command','POST',{agent_id:agentID,type:'scan_files',payload}).then(res => {
+    if (res.success) toast('Scan command sent! Waiting for results...');
+    else toast('Error: '+res.error);
+    setTimeout(loadFiles, 3000);
+  });
 }
 
 function sendScanCommand() {
@@ -318,8 +402,17 @@ async function selectAllFiles() {
   if (!agentFilter) { toast('Select an agent first'); return; }
   const chunkSize = parseInt(document.getElementById('chunk-size').value) || 3;
   const res = await api('/files/select','POST',{select_all:true, agent_id:agentFilter, chunk_size:chunkSize});
-  if (res.success) { toast('All files selected for monitoring!'); loadFiles(); }
+  if (res.success) { toast('Files selected! Click ▶ Start Monitoring'); loadFiles(); }
   else toast('Error: '+res.error);
+}
+
+async function startMonitoring() {
+  const agentFilter = document.getElementById('file-agent-filter').value;
+  if (!agentFilter) { toast('Select an agent first'); return; }
+  const chunkSize = parseInt(document.getElementById('chunk-size').value) || 3;
+  await api('/files/select','POST',{select_all:true, agent_id:agentFilter, chunk_size:chunkSize});
+  toast('Monitoring started!');
+  loadFiles();
 }
 
 async function saveAIConfig() {
@@ -344,8 +437,12 @@ async function saveTGConfig() {
   if (res.success) toast('Telegram config saved!');
 }
 
-// Auto-load
 async function init() {
+  const sess = await api('/session');
+  if (!sess.success || !sess.data || !sess.data.authenticated) {
+    window.location.href = '/login';
+    return;
+  }
   const res = await api('/config/ai');
   if (res.data) {
     document.getElementById('cfg-ai-provider').value = res.data.provider||'ollama';
@@ -360,6 +457,7 @@ async function init() {
     document.getElementById('cfg-tg-chat').value = tg.data.chat_id||'';
     document.getElementById('cfg-tg-enabled').checked = tg.data.enabled||false;
   }
+  document.getElementById('user-info').textContent = sess.data.username;
   refreshAll();
 }
 

@@ -14,6 +14,9 @@ services:
       - PORT=8080
       - API_KEY=${MASTER_API_KEY:-sera-default-key}
       - MAX_STORAGE_MB=${MAX_STORAGE_MB:-500}
+      # Admin Credentials
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS=${ADMIN_PASS:-sera-admin-2024}
       # AI Configuration
       - AI_PROVIDER=${AI_PROVIDER:-ollama}
       - AI_BASE_URL=${AI_BASE_URL:-http://ollama:11434}

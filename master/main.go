@@ -25,6 +25,11 @@ func main() {
 	loadConfig()
 	initDB()
 
+	// Setup admin user
+	adminUser := getEnv("ADMIN_USER", "admin")
+	adminPass := getEnv("ADMIN_PASS", "sera-admin-2024")
+	setupAdmin(adminUser, adminPass)
+
 	log.Printf("[MASTER] Starting on port %s", config.Port)
 	log.Printf("[MASTER] Max storage: %d MB", config.MaxStorageMB)
 	log.Printf("[MASTER] AI Provider: %s, Model: %s", config.AI.Provider, config.AI.Model)
@@ -40,19 +45,26 @@ func main() {
 	mux.HandleFunc("/api/agent/report", authMiddleware(handleAgentReport))
 	mux.HandleFunc("/api/agent/scan-result", authMiddleware(handleAgentScanResult))
 
-	// === Admin API ===
-	mux.HandleFunc("/api/agents", authMiddleware(handleGetAgents))
-	mux.HandleFunc("/api/agents/", authMiddleware(handleGetAgent))
-	mux.HandleFunc("/api/command", authMiddleware(handleSendCommand))
-	mux.HandleFunc("/api/files", authMiddleware(handleGetFiles))
-	mux.HandleFunc("/api/files/select", authMiddleware(handleSelectFiles))
-	mux.HandleFunc("/api/reports", authMiddleware(handleGetReports))
-	mux.HandleFunc("/api/storage", authMiddleware(handleGetStorage))
-	mux.HandleFunc("/api/config/ai", authMiddleware(handleAIConfig))
-	mux.HandleFunc("/api/config/telegram", authMiddleware(handleTelegramConfig))
+	// === Login / Auth API ===
+	mux.HandleFunc("/api/login", handleLogin)
+	mux.HandleFunc("/api/logout", handleLogout)
+	mux.HandleFunc("/api/captcha", handleCaptcha)
+	mux.HandleFunc("/api/session", handleCheckSession)
 
-	// === Dashboard ===
-	mux.HandleFunc("/", handleDashboard)
+	// === Admin API (session-protected) ===
+	mux.HandleFunc("/api/agents", sessionMiddleware(authMiddleware(handleGetAgents)))
+	mux.HandleFunc("/api/agents/", sessionMiddleware(authMiddleware(handleGetAgent)))
+	mux.HandleFunc("/api/command", sessionMiddleware(authMiddleware(handleSendCommand)))
+	mux.HandleFunc("/api/files", sessionMiddleware(authMiddleware(handleGetFiles)))
+	mux.HandleFunc("/api/files/select", sessionMiddleware(authMiddleware(handleSelectFiles)))
+	mux.HandleFunc("/api/reports", sessionMiddleware(authMiddleware(handleGetReports)))
+	mux.HandleFunc("/api/storage", sessionMiddleware(authMiddleware(handleGetStorage)))
+	mux.HandleFunc("/api/config/ai", sessionMiddleware(authMiddleware(handleAIConfig)))
+	mux.HandleFunc("/api/config/telegram", sessionMiddleware(authMiddleware(handleTelegramConfig)))
+
+	// === Dashboard (session-protected) ===
+	mux.HandleFunc("/", sessionMiddleware(handleDashboard))
+	mux.HandleFunc("/login", handleLoginPage)
 	mux.HandleFunc("/health", handleHealth)
 
 	log.Printf("[MASTER] Listening on :%s", config.Port)
@@ -382,13 +394,19 @@ func handleAgentScanResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store found files in DB
+	// Store found files in DB (deduplicate by agent_id + path)
 	for _, f := range req.Result.Files {
-		fileID := uuid.New().String()
-		db.Exec(
-			"INSERT OR REPLACE INTO files (id, agent_id, path, size, mod_time, selected, status, chunk_size, offset) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			fileID, req.AgentID, f.Path, f.Size, f.ModTime, 0, "pending", config.AI.ChunkSize, 0,
-		)
+		var existingID string
+		err := db.QueryRow("SELECT id FROM files WHERE agent_id = ? AND path = ?", req.AgentID, f.Path).Scan(&existingID)
+		if err == nil {
+			db.Exec("UPDATE files SET size = ?, mod_time = ? WHERE id = ?", f.Size, f.ModTime, existingID)
+		} else {
+			fileID := uuid.New().String()
+			db.Exec(
+				"INSERT INTO files (id, agent_id, path, size, mod_time, selected, status, chunk_size, offset) VALUES (?, ?, ?, ?, ?, 0, 'pending', ?, 0)",
+				fileID, req.AgentID, f.Path, f.Size, f.ModTime, config.AI.ChunkSize,
+			)
+		}
 	}
 
 	// Mark command completed
@@ -514,30 +532,53 @@ func handleSendCommand(w http.ResponseWriter, r *http.Request) {
 
 func handleGetFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.URL.Query().Get("agent_id")
+	status := r.URL.Query().Get("status")
 
-	var rows *sql.Rows
-	var err error
+	query := "SELECT id, agent_id, path, size, mod_time, selected, status, chunk_size, offset FROM files WHERE 1=1"
+	args := []interface{}{}
+
 	if agentID != "" {
-		rows, err = db.Query("SELECT id, agent_id, path, size, mod_time, selected, status, chunk_size, offset FROM files WHERE agent_id = ? ORDER BY path", agentID)
-	} else {
-		rows, err = db.Query("SELECT id, agent_id, path, size, mod_time, selected, status, chunk_size, offset FROM files ORDER BY agent_id, path")
+		query += " AND agent_id = ?"
+		args = append(args, agentID)
 	}
+	if status != "" {
+		query += " AND status = ?"
+		args = append(args, status)
+	}
+	query += " ORDER BY path"
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		jsonError(w, "database error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var files []FileEntry
+	type FileWithProgress struct {
+		FileEntry
+		ProcessedChunks int `json:"processed_chunks"`
+		TotalReports    int `json:"total_reports"`
+		ActionReports   int `json:"action_reports"`
+	}
+
+	var files []FileWithProgress
 	for rows.Next() {
 		var f FileEntry
 		var sel int
 		rows.Scan(&f.ID, &f.AgentID, &f.Path, &f.Size, &f.ModTime, &sel, &f.Status, &f.ChunkSize, &f.Offset)
 		f.Selected = sel == 1
-		files = append(files, f)
+
+		fwp := FileWithProgress{FileEntry: f}
+		db.QueryRow("SELECT COUNT(*) FROM ai_reports WHERE agent_id = ? AND file_path = ?", f.AgentID, f.Path).Scan(&fwp.TotalReports)
+		db.QueryRow("SELECT COUNT(*) FROM ai_reports WHERE agent_id = ? AND file_path = ? AND needs_action = 1", f.AgentID, f.Path).Scan(&fwp.ActionReports)
+		if f.ChunkSize > 0 {
+			fwp.ProcessedChunks = int(f.Offset) / f.ChunkSize
+		}
+
+		files = append(files, fwp)
 	}
 	if files == nil {
-		files = []FileEntry{}
+		files = []FileWithProgress{}
 	}
 
 	jsonResponse(w, APIResponse{Success: true, Data: files})
@@ -683,6 +724,11 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, dashboardHTML)
+}
+
+func handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, loginPageHTML)
 }
 
 // ============================================================
