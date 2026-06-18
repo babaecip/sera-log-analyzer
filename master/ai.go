@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -193,8 +194,14 @@ func callOllama(userMsg string) (string, error) {
 	body, _ := json.Marshal(reqBody)
 	url := config.AI.BaseURL + "/api/chat"
 
+	timeoutSec := config.AI.Timeout
+	if timeoutSec <= 0 {
+		timeoutSec = 120
+	}
+	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+
 	start := time.Now()
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -235,14 +242,20 @@ func callOpenAI(userMsg string) (string, error) {
 	body, _ := json.Marshal(reqBody)
 	url := config.AI.BaseURL + "/v1/chat/completions"
 
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if config.AI.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+config.AI.APIKey)
 	}
 
+	timeoutSec := config.AI.Timeout
+	if timeoutSec <= 0 {
+		timeoutSec = 120
+	}
+	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {

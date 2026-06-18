@@ -54,10 +54,13 @@ func main() {
 	// === Admin API (session-protected) ===
 	mux.HandleFunc("/api/agents", sessionMiddleware(handleGetAgents))
 	mux.HandleFunc("/api/agents/", sessionMiddleware(handleAgentActions))
+	mux.HandleFunc("/api/agents/bulk-delete", sessionMiddleware(handleBulkDeleteAgents))
 	mux.HandleFunc("/api/command", sessionMiddleware(handleSendCommand))
 	mux.HandleFunc("/api/files", sessionMiddleware(handleGetFiles))
 	mux.HandleFunc("/api/files/", sessionMiddleware(handleFileActions))
 	mux.HandleFunc("/api/files/select", sessionMiddleware(handleSelectFiles))
+	mux.HandleFunc("/api/files/stop-monitoring", sessionMiddleware(handleStopMonitoring))
+	mux.HandleFunc("/api/files/bulk-delete", sessionMiddleware(handleBulkDeleteFiles))
 	mux.HandleFunc("/api/reports", sessionMiddleware(handleGetReports))
 	mux.HandleFunc("/api/ai-logs", sessionMiddleware(handleGetAILogs))
 	mux.HandleFunc("/api/storage", sessionMiddleware(handleGetStorage))
@@ -88,6 +91,7 @@ func loadConfig() {
 			MaxTokens:   getEnvInt("AI_MAX_TOKENS", 512),
 			Temperature: 0.3,
 			ChunkSize:   getEnvInt("AI_CHUNK_SIZE", 3),
+			Timeout:     getEnvInt("AI_TIMEOUT", 120),
 		},
 		Telegram: TelegramConfig{
 			BotToken: getEnv("TG_BOT_TOKEN", ""),
@@ -433,6 +437,9 @@ func handleAgentScanResult(w http.ResponseWriter, r *http.Request) {
 			now, marshalJSON(req.Result), req.CommandID)
 	}
 
+	// Reset agent status to online after scan completes
+	db.Exec("UPDATE agents SET status = 'online' WHERE id = ?", req.AgentID)
+
 	log.Printf("[MASTER] Scan result from %s: %d files found", req.AgentID, req.Result.Total)
 	jsonResponse(w, APIResponse{Success: true})
 }
@@ -505,11 +512,15 @@ func handleGetAgents(w http.ResponseWriter, r *http.Request) {
 		agents = []Agent{}
 	}
 
-	// Mark agents offline if no heartbeat in 60s
+	// Mark agents offline if no heartbeat in 60s, or reset scanning if stuck > 5min
 	for i := range agents {
-		if time.Since(agents[i].LastHeartbeat) > 60*time.Second {
+		hbAge := time.Since(agents[i].LastHeartbeat)
+		if hbAge > 60*time.Second {
 			agents[i].Status = AgentOffline
 			db.Exec("UPDATE agents SET status = 'offline' WHERE id = ?", agents[i].ID)
+		} else if agents[i].Status == AgentScanning && hbAge > 5*time.Minute {
+			agents[i].Status = AgentOnline
+			db.Exec("UPDATE agents SET status = 'online' WHERE id = ?", agents[i].ID)
 		}
 	}
 
@@ -578,6 +589,80 @@ func handleSendCommand(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[MASTER] Command %s sent to agent %s: %s", cmdID, req.AgentID, req.Type)
 	jsonResponse(w, APIResponse{Success: true, Data: map[string]string{"command_id": cmdID}})
+}
+
+func handleBulkDeleteAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	for _, id := range req.IDs {
+		db.Exec("DELETE FROM agents WHERE id = ?", id)
+		db.Exec("DELETE FROM files WHERE agent_id = ?", id)
+		db.Exec("DELETE FROM commands WHERE agent_id = ?", id)
+		db.Exec("DELETE FROM log_chunks WHERE agent_id = ?", id)
+		db.Exec("DELETE FROM ai_reports WHERE agent_id = ?", id)
+	}
+	log.Printf("[MASTER] Bulk deleted %d agents", len(req.IDs))
+	jsonResponse(w, APIResponse{Success: true})
+}
+
+func handleStopMonitoring(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Reset all monitoring/processing files back to pending
+	db.Exec("UPDATE files SET status = 'pending', selected = 0, offset = 0 WHERE status IN ('monitoring', 'processing')")
+
+	// Send stop_all command to all agents with pending commands
+	rows, err := db.Query("SELECT DISTINCT agent_id FROM files WHERE status IN ('monitoring', 'processing') OR agent_id IN (SELECT DISTINCT agent_id FROM commands WHERE type = 'start_monitor')")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var agentID string
+			rows.Scan(&agentID)
+			cmdID := uuid.New().String()
+			db.Exec(
+				"INSERT INTO commands (id, agent_id, type, status, payload, created_at) VALUES (?, ?, ?, 'pending', '{}', ?)",
+				cmdID, agentID, CmdStopAll, time.Now(),
+			)
+		}
+	}
+
+	log.Printf("[MASTER] Stop monitoring requested for all agents")
+	jsonResponse(w, APIResponse{Success: true})
+}
+
+func handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	for _, id := range req.IDs {
+		db.Exec("DELETE FROM files WHERE id = ?", id)
+	}
+	log.Printf("[MASTER] Bulk deleted %d files", len(req.IDs))
+	jsonResponse(w, APIResponse{Success: true})
 }
 
 func handleGetAILogs(w http.ResponseWriter, r *http.Request) {

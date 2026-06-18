@@ -143,6 +143,7 @@ type AIConfig struct {
 	MaxTokens   int     `json:"max_tokens"`
 	Temperature float64 `json:"temperature"`
 	ChunkSize   int     `json:"chunk_size"`
+	Timeout     int     `json:"timeout"` // seconds, default 120
 }
 
 type TelegramConfig struct {

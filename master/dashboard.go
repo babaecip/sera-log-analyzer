@@ -100,6 +100,10 @@ var dashboardHTML = `<!DOCTYPE html>
   .ai-log-pre { background: #1a1c2e; border: 1px solid #2a2d3e; border-radius: 6px; padding: 10px; font-size: 11px; font-family: monospace; color: #e1e4e8; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; margin-top: 6px; display: none; }
   .btn-delete { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
   .btn-delete:hover { background: #7f1d1d; color: #fca5a5; }
+  .btn-stop { background: #451a03; color: #fbbf24; border: 1px solid #92400e; }
+  .btn-stop:hover { background: #92400e; color: #fde68a; }
+  .bulk-bar { display:none; align-items:center; gap:10px; padding:10px 16px; margin-bottom:12px; background:#1e2030; border-radius:8px; border:1px solid #2a2d3e; }
+  .bulk-bar.active { display:flex; }
 </style>
 </head>
 <body>
@@ -130,9 +134,14 @@ var dashboardHTML = `<!DOCTYPE html>
       <h3 style="flex:1">Registered Agents</h3>
       <button class="btn btn-primary btn-sm" onclick="refreshAll()">↻ Refresh</button>
     </div>
+    <div class="bulk-bar" id="agents-bulk-bar">
+      <span id="agents-selected-count" style="color:#e1e4e8;font-size:13px">0 selected</span>
+      <button class="btn btn-delete btn-sm" onclick="bulkDeleteAgents()">🗑 Delete Selected</button>
+      <button class="btn btn-sm" style="background:#374151;color:#e1e4e8" onclick="clearAgentSelection()">✕ Cancel</button>
+    </div>
     <table>
-      <thead><tr><th style="width:15%">Name</th><th class="col-id">ID</th><th style="width:10%">IP</th><th class="col-status">Status</th><th style="width:18%">Last Heartbeat</th><th style="width:18%">Actions</th></tr></thead>
-      <tbody id="agents-table"><tr><td colspan="6" class="empty-state">Loading...</td></tr></tbody>
+      <thead><tr><th style="width:40px"><input type="checkbox" id="select-all-agents" onchange="toggleAllAgents(this)"></th><th style="width:15%">Name</th><th class="col-id">ID</th><th style="width:10%">IP</th><th class="col-status">Status</th><th style="width:18%">Last Heartbeat</th><th style="width:18%">Actions</th></tr></thead>
+      <tbody id="agents-table"><tr><td colspan="7" class="empty-state">Loading...</td></tr></tbody>
     </table>
   </div>
 
@@ -161,10 +170,16 @@ var dashboardHTML = `<!DOCTYPE html>
         <button class="btn btn-success btn-sm" onclick="selectAllFiles()">✅ 2. Select All</button>
         <button class="btn btn-primary btn-sm" onclick="startMonitoring()">▶ 3. Start Monitoring</button>
       </div>
-      <button class="btn btn-sm" style="background:#374151;color:#e1e4e8;margin-left:auto" onclick="loadFiles()">↻ Refresh</button>
+      <button class="btn btn-stop btn-sm" onclick="stopAllMonitoring()">⏹ Stop All</button>
+      <button class="btn btn-sm" style="background:#374151;color:#e1e4e8" onclick="loadFiles()">↻ Refresh</button>
     </div>
 
     <!-- File Table -->
+    <div class="bulk-bar" id="files-bulk-bar">
+      <span id="files-selected-count" style="color:#e1e4e8;font-size:13px">0 selected</span>
+      <button class="btn btn-delete btn-sm" onclick="bulkDeleteFiles()">🗑 Delete Selected</button>
+      <button class="btn btn-sm" style="background:#374151;color:#e1e4e8" onclick="clearFileSelection()">✕ Cancel</button>
+    </div>
     <table>
       <thead><tr>
         <th class="col-checkbox"><input type="checkbox" id="select-all-cb" onchange="toggleAllCheckboxes(this)"></th>
@@ -219,6 +234,10 @@ var dashboardHTML = `<!DOCTYPE html>
         <div class="form-group">
           <label>Chunk Size (lines per request)</label>
           <input type="number" id="cfg-chunk" value="3" min="1" max="50">
+        </div>
+        <div class="form-group">
+          <label>AI Timeout (seconds)</label>
+          <input type="number" id="cfg-timeout" value="120" min="10" max="600">
         </div>
         <button class="btn btn-primary" onclick="saveAIConfig()">Save AI Config</button>
       </div>
@@ -289,6 +308,13 @@ async function refreshAll() {
   await Promise.all([loadAgents(), loadFiles(), loadReports(), loadStorage(), loadAILogs()]);
 }
 
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+
 async function loadAgents() {
   const res = await api('/agents');
   agents = res.data || [];
@@ -306,11 +332,12 @@ async function loadAgents() {
     if (a.status === 'offline') {
       actions += ' <button class="btn btn-delete btn-sm" onclick="deleteAgent(\''+a.id+'\',\''+a.name+'\')">🗑 Delete</button>';
     }
-    html += '<tr><td>'+a.name+'</td><td style="font-family:monospace;font-size:11px" title="'+a.id+'">'+a.id.slice(0,8)+'...</td><td>'+a.ip+'</td><td><span class="badge '+badge+'">'+a.status+'</span></td><td>'+hb+'</td><td>'+actions+'</td></tr>';
+    html += '<tr><td><input type="checkbox" class="agent-cb" value="'+a.id+'" onchange="updateAgentBulkBar()"></td><td>'+a.name+'</td><td style="font-family:monospace;font-size:11px" title="'+a.id+'">'+a.id.slice(0,8)+'...</td><td>'+a.ip+'</td><td><span class="badge '+badge+'">'+a.status+'</span></td><td>'+hb+'</td><td>'+actions+'</td></tr>';
     filter.innerHTML += '<option value="'+a.id+'">'+a.name+'</option>';
   });
   filter.value = prevVal;
   tbody.innerHTML = html;
+  updateAgentBulkBar();
 }
 
 async function loadFiles() {
@@ -349,7 +376,6 @@ function renderFileTable() {
   }
   let html = '';
   files.forEach(f => {
-    const sizeKB = (f.size/1024).toFixed(1);
     const agent = agents.find(a => a.id===f.agent_id);
     const isPending = f.status === 'pending';
     const isMonitoring = f.status === 'monitoring' || f.status === 'processing';
@@ -373,18 +399,19 @@ function renderFileTable() {
         + '</div>';
     }
     const cbHtml = isPending
-      ? '<td><input type="checkbox" class="file-cb" value="'+f.id+'" data-agent="'+f.agent_id+'"></td>'
+      ? '<td><input type="checkbox" class="file-cb" value="'+f.id+'" data-agent="'+f.agent_id+'" onchange="updateFileBulkBar()"></td>'
       : '<td><input type="checkbox" disabled checked></td>';
     const deleteBtn = '<td><button class="btn btn-delete btn-sm" onclick="deleteFile(\''+f.id+'\')" title="Delete">🗑</button></td>';
     html += '<tr'+(isDone?' style="opacity:0.6"':'')+'>'+cbHtml
       +'<td class="col-path" style="font-family:monospace;font-size:12px" title="'+f.path+'">'+f.path+'</td>'
       +'<td>'+(agent?agent.name:'?')+'</td>'
-      +'<td>'+sizeKB+' KB</td>'
+      +'<td>'+formatFileSize(f.size)+'</td>'
       +'<td>'+progressHtml+'</td>'
       +'<td>'+statusBadge+'</td>'
       +deleteBtn+'</tr>';
   });
   tbody.innerHTML = html;
+  updateFileBulkBar();
 }
 
 async function loadReports() {
@@ -518,6 +545,71 @@ function sendScanCommand() {
 
 function toggleAllCheckboxes(cb) {
   document.querySelectorAll('.file-cb').forEach(c => c.checked = cb.checked);
+  updateFileBulkBar();
+}
+
+function toggleAllAgents(cb) {
+  document.querySelectorAll('.agent-cb').forEach(c => c.checked = cb.checked);
+  updateAgentBulkBar();
+}
+
+function updateFileBulkBar() {
+  const checked = document.querySelectorAll('.file-cb:checked');
+  const bar = document.getElementById('files-bulk-bar');
+  if (checked.length > 0) {
+    bar.classList.add('active');
+    document.getElementById('files-selected-count').textContent = checked.length + ' file(s) selected';
+  } else {
+    bar.classList.remove('active');
+  }
+}
+
+function updateAgentBulkBar() {
+  const checked = document.querySelectorAll('.agent-cb:checked');
+  const bar = document.getElementById('agents-bulk-bar');
+  if (checked.length > 0) {
+    bar.classList.add('active');
+    document.getElementById('agents-selected-count').textContent = checked.length + ' agent(s) selected';
+  } else {
+    bar.classList.remove('active');
+  }
+}
+
+function clearFileSelection() {
+  document.querySelectorAll('.file-cb').forEach(c => c.checked = false);
+  document.getElementById('select-all-cb').checked = false;
+  updateFileBulkBar();
+}
+
+function clearAgentSelection() {
+  document.querySelectorAll('.agent-cb').forEach(c => c.checked = false);
+  document.getElementById('select-all-agents').checked = false;
+  updateAgentBulkBar();
+}
+
+async function bulkDeleteFiles() {
+  const ids = Array.from(document.querySelectorAll('.file-cb:checked')).map(c => c.value);
+  if (!ids.length) { toast('No files selected'); return; }
+  if (!confirm('Delete '+ids.length+' file(s) from the list?')) return;
+  const res = await api('/files/bulk-delete', 'POST', {ids});
+  if (res.success) { toast(ids.length+' file(s) deleted!'); loadFiles(); }
+  else toast('Error: '+res.error);
+}
+
+async function bulkDeleteAgents() {
+  const ids = Array.from(document.querySelectorAll('.agent-cb:checked')).map(c => c.value);
+  if (!ids.length) { toast('No agents selected'); return; }
+  if (!confirm('Delete '+ids.length+' agent(s) and ALL their data?')) return;
+  const res = await api('/agents/bulk-delete', 'POST', {ids});
+  if (res.success) { toast(ids.length+' agent(s) deleted!'); loadAgents(); loadFiles(); }
+  else toast('Error: '+res.error);
+}
+
+async function stopAllMonitoring() {
+  if (!confirm('Stop ALL monitoring? This will reset all monitoring files to pending.')) return;
+  const res = await api('/files/stop-monitoring', 'POST');
+  if (res.success) { toast('Monitoring stopped!'); loadFiles(); }
+  else toast('Error: '+res.error);
 }
 
 async function selectAllFiles() {
@@ -547,6 +639,7 @@ async function saveAIConfig() {
     max_tokens: 512,
     temperature: 0.3,
     chunk_size: parseInt(document.getElementById('cfg-chunk').value)||3,
+    timeout: parseInt(document.getElementById('cfg-timeout').value)||120,
   });
   if (res.success) toast('AI config saved!');
 }
@@ -573,6 +666,7 @@ async function init() {
     document.getElementById('cfg-ai-model').value = res.data.model||'';
     document.getElementById('cfg-ai-key').value = res.data.api_key||'';
     document.getElementById('cfg-chunk').value = res.data.chunk_size||3;
+    document.getElementById('cfg-timeout').value = res.data.timeout||120;
   }
   const tg = await api('/config/telegram');
   if (tg.data) {
