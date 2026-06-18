@@ -5,9 +5,7 @@ services:
   # MASTER - Admin dashboard, AI processing, Telegram notifications
   # ============================================================
   master:
-    build:
-      context: .
-      dockerfile: master/Dockerfile
+    image: mrseptian/sera-log-analyzer:master
     container_name: sera-master
     restart: unless-stopped
     ports:
@@ -58,9 +56,7 @@ services:
   # AGENT 1 - Log scanner (connects to master)
   # ============================================================
   agent-1:
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
+    image: mrseptian/sera-log-analyzer:agent
     container_name: sera-agent-1
     restart: unless-stopped
     depends_on:
@@ -91,9 +87,7 @@ services:
   #   AGENT_NAME=agent-remote-1
   # ============================================================
   # agent-2:
-  #   build:
-  #     context: .
-  #     dockerfile: agent/Dockerfile
+  #   image: mrseptian/sera-log-analyzer:agent
   #   container_name: sera-agent-2
   #   restart: unless-stopped
   #   depends_on:
