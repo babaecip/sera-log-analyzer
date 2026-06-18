@@ -52,15 +52,15 @@ func main() {
 	mux.HandleFunc("/api/session", handleCheckSession)
 
 	// === Admin API (session-protected) ===
-	mux.HandleFunc("/api/agents", sessionMiddleware(authMiddleware(handleGetAgents)))
-	mux.HandleFunc("/api/agents/", sessionMiddleware(authMiddleware(handleGetAgent)))
-	mux.HandleFunc("/api/command", sessionMiddleware(authMiddleware(handleSendCommand)))
-	mux.HandleFunc("/api/files", sessionMiddleware(authMiddleware(handleGetFiles)))
-	mux.HandleFunc("/api/files/select", sessionMiddleware(authMiddleware(handleSelectFiles)))
-	mux.HandleFunc("/api/reports", sessionMiddleware(authMiddleware(handleGetReports)))
-	mux.HandleFunc("/api/storage", sessionMiddleware(authMiddleware(handleGetStorage)))
-	mux.HandleFunc("/api/config/ai", sessionMiddleware(authMiddleware(handleAIConfig)))
-	mux.HandleFunc("/api/config/telegram", sessionMiddleware(authMiddleware(handleTelegramConfig)))
+	mux.HandleFunc("/api/agents", sessionMiddleware(handleGetAgents))
+	mux.HandleFunc("/api/agents/", sessionMiddleware(handleGetAgent))
+	mux.HandleFunc("/api/command", sessionMiddleware(handleSendCommand))
+	mux.HandleFunc("/api/files", sessionMiddleware(handleGetFiles))
+	mux.HandleFunc("/api/files/select", sessionMiddleware(handleSelectFiles))
+	mux.HandleFunc("/api/reports", sessionMiddleware(handleGetReports))
+	mux.HandleFunc("/api/storage", sessionMiddleware(handleGetStorage))
+	mux.HandleFunc("/api/config/ai", sessionMiddleware(handleAIConfig))
+	mux.HandleFunc("/api/config/telegram", sessionMiddleware(handleTelegramConfig))
 
 	// === Dashboard (session-protected) ===
 	mux.HandleFunc("/", sessionMiddleware(handleDashboard))
